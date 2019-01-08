@@ -1,0 +1,3130 @@
+<!-- Aaron Watkins (ACW) - RTVP Creator -->
+<HTML>
+	<HEAD>
+		<TITLE>XORAIL: RTVP Creator</TITLE>
+		<HTA:APPLICATION ID="oHTA"
+		 APPLICATIONNAME="RTVP Creator"
+		 BORDER="Thick"
+		 BORDERSTYLE="Normal"
+		 CAPTION="yes"
+		 ICON="P:\Designer\Aaron\RTVP_Creator\Xorail.ico"
+		 MAXIMIZEBUTTON="yes"
+		 MINIMIZEBUTTON="yes"
+		 SHOWINTASKBAR="yes"
+		 SINGLEINSTANCE="no"
+		 SYSMENU="yes"
+		 VERSION="1.0"
+		 WINDOWSTATE="normal"
+		 SCROLL="no"/>
+	</HEAD>
+	<SCRIPT LANGUAGE=VBScript> 
+		'Global variable declarations and hard coded paths
+		Dim GoodFiles()
+		winY=830
+		winX=542
+		valDirPrefix = "P:\Validation\"
+		RTVPcreatorRootDir = "P:\Designer\Aaron\"
+		docCreatorDir = RTVPcreatorRootDir & "docCreator\"
+		RTVP_CreatorDir = RTVPcreatorRootDir & "RTVP_Creator\"
+		Dim VcardDisabled
+		ScriptStopper = 0
+		SixtyFourBit = 0
+		
+		Sub Main()
+			If  (StrComp(userselections.yearSelection.value, Year(date)) <> 0) And (userselections.validationRTVnum.value = "") Then 
+				MsgBox("If you are going to edit an RTV from a previous year (" & userselections.yearSelection.value & "), you must enter a folder number for the RTV that you will be making changes to.")
+				Exit Sub
+			End If
+			
+			'hard coded values
+			RTVPcreatorLogsPath = valDirPrefix & "RTVPCreatorLogs\"
+			compilerPathVHLC = RTVP_CreatorDir & "Harmon\Valc46f\VALCM46F"
+			validatorPathVHLC = RTVP_CreatorDir & "Harmon\Valc46f\Val19c"
+			If SixtyFourBit Then
+				LogicStationPath = "C:\Program Files (x86)\GETS Global Signaling\Logic Station "
+			Else
+				LogicStationPath = "C:\Program Files\GETS Global Signaling\Logic Station "
+			End If
+			Set objTxtArea = window.document.getElementById("StatusMsg")
+			
+			'array declaration
+			Dim crc(200,5), sum(200,5), valCrc(200,5), _
+			firstRtvCompile(5), lastRtvCompile(5), OldConsCrc(5), _
+			OldConsSum(5), OldVitalCrc(5), OldVitalSum(5), _
+			OldNonVitalCrc1(5), OldNonVitalCrc2(5), OldNonVitalSum1(5), _
+			OldNonVitalSum2(5), NewConsCrc(5), NewConsSum(5), _
+			NewVitalCrc(5), NewVitalSum(5), NewNonVitalCrc1(5), _
+			NewNonVitalCrc2(5), NewNonVitalSum1(5), NewNonVitalSum2(5), _
+			log(5), equipType(5), programName(5), programNameSpaceToTilde(5),_
+			oldVitalCrcFromCons(5), oldVitalSumFromCons(5), NewVitalCrcFromCons(5), _
+			NewVitalSumFromCons(5), inServiceValCrc(5), RecompiledInServiceValCrc(5), _
+			valFileValidationCrc(5), newValCrc(5), newValFileValidationCrc(5), _
+			inSrvcCheckValCrc(5), newCheckValCrc(5), finalNewValFileValidationCrc(5), _
+			logSuffix(5), NonVitalName(5), NVChanges(5), CompileWaitTime(2), _
+			VitalRTVPchanges(5), NonVitalRTVPchanges(5), NewNonVitalName(5)
+			
+			Dim NVdiffOK
+			
+			With userselections
+				programmer = .programmerUS.value
+				mPost = .mPostUS.value
+				xrl = .xrlUS.value
+				csx = .rrNumUS.value
+				dvsn = .dvsnUS.value
+				sdvsn = .sdvsnUS.value
+				sdvsnAbrv = .sdvsnAbrvUS.value
+				'city = .cityUS.value
+				st = .stUS.value
+				houses = .housesUS.value	
+			End With
+			
+			Set oFSO = CreateObject("Scripting.FileSystemObject")
+			If oFSO.FileExists(RTVP_CreatorDir & "Sig\" & programmer & " Sig.jpg") Then
+				'programmerSigFilePath = RTVP_CreatorDir & "Sig\" & programmer & " Sig.jpg"
+				programmerSigFilePath = RTVP_CreatorDir & "Sig\Blank Sig.jpg"
+			Else
+				'programmerSigFilePath = "C:\" & programmer & " Sig.jpg"
+				programmerSigFilePath = RTVP_CreatorDir & "Sig\Blank Sig.jpg"
+			End If
+
+			strtDateMonth = MonthName(Month(date)) & " " & Day(date) & ", " & Year(date) 
+			strtDate = date
+			
+			workingDir = userselections.workingDirPath.value
+			folderPath = split(workingDir, "\")
+			folderDepth = UBound(folderPath)
+			workingDirBackup = FindBackUpFolder(userselections.workingDirPath.value, 0)
+			timeStamp = getTimeStamp()
+			If oFSO.FolderExists(workingDir) Then
+				userselections.workingDirPath.STYLE.backgroundcolor = "#FFFFFF"
+				ArchiveFolder workingDir, workingDirBackup & timeStamp & folderPath(folderDepth) & " beforeRTVprocessStarted"
+				If ScriptStopper Then
+					Exit Sub
+				End If
+				for each x in folderPath
+					loc = Ucase(x)
+				next
+				loc = InputBox("Enter the full location name if " & loc & " is not correct. (If you are revising an RTV, make sure the spelling is IDENTICAL to previous RTVP validation folder name.)", "Location Name", loc)
+				Call CreateInfoWrksht(loc, 0)
+				objTxtArea.Value = timeStamp & "Info worksheet created." & VbCrLf
+				objTxtArea.scrollTop = objTxtArea.scrollTop
+			Else
+				userselections.workingDirPath.STYLE.backgroundcolor = "#FF7777"
+				objTxtArea.Value = timeStamp & "Enter existing working folder where the RTV work was completed." & VbCrLf
+				objTxtArea.scrollTop = objTxtArea.scrollTop
+				Exit Sub
+			End If
+			Set oFSO = Nothing
+			objTxtArea.Value = timeStamp & "Backup of working directory files before process begins: """ & workingDir & "\" & timeStamp & folderPath(folderDepth) & " beforeRTVprocessStarted""" & VbCrLf
+			objTxtArea.scrollTop = objTxtArea.scrollTop
+			Delay(1)
+			
+			newCdriveFolder = DoesFolderExist(folderPath, folderDepth - 1)
+			set filesys = CreateObject("Scripting.FileSystemObject")
+			filesys.CopyFolder workingDir, newCdriveFolder & "\"
+			set filesys = Nothing
+			workingDirP = workingDir
+			
+			CompileWaitTime(0) = 1
+			CompileWaitTime(1) = 1
+			
+			'validation and source folder creation
+			Num_NewSrcFldr = getNewSrcFldr(valDirPrefix, loc)
+			num = Num_NewSrcFldr(0)
+			newSrcFldr = Num_NewSrcFldr(1)
+			SrcFldrAlreadyExisted = Num_NewSrcFldr(2)
+			userselections.sourceDirPath.value = newSrcFldr
+			If SrcFldrAlreadyExisted = 1 Then
+				validationBackupDir = FindBackUpFolder(newSrcFldr, 1)
+				BackupValidationFolder(validationBackupDir)
+			End If
+			userselections.createPDFbutton.disabled = False
+			Call CreateInfoWrksht(loc, 1)
+			
+			'Create House String
+			foundHouseString = 0
+			Set fso = CreateObject("Scripting.FileSystemObject")						
+			If SrcFldrAlreadyExisted = 1 And (fso.FileExists(newSrcFldr & "\01 " & loc & " Cover Page and Letter.doc") Or fso.FileExists(newSrcFldr & "\01 " & loc & " Cover Page and Letter NV.doc"))Then
+				Set objWord = CreateObject("Word.Application")
+				objWord.Visible = False	
+				If userselections.NonVitalRTVP.Checked Then
+					Set coverPage = objWord.Documents.Open(newSrcFldr & "\01 " & loc & " Cover Page and Letter NV.doc")
+				Else
+					Set coverPage = objWord.Documents.Open(newSrcFldr & "\01 " & loc & " Cover Page and Letter.doc")
+				End If
+				tempHousesString1 = Split(coverPage.LocNameHouses.Caption, "; ", 2) ' = loc & "; " & houseOrHouses & housesString & "."
+				If Not (UBound(tempHousesString1) = 0) Then 
+					tempHousesString2 = Split(tempHousesString1(1), " ", 2)
+					houseOrHouses = tempHousesString2(0) & " "
+					housesString = Left(tempHousesString2(1), Len(tempHousesString2(1)) - 1)
+					tempHouses1 = Split(housesString, ",")
+					tempHousesUBound1 = UBound(tempHouses1)
+					For i = 0 To tempHousesUBound1
+						tempHouses2 = tempHouses2 & tempHouses1(i)
+					Next
+					tempHouses3 = Split(tempHouses2, "and ")
+					tempHousesUBound3 = UBound(tempHouses3)
+					If tempHousesUBound3 > 0 Then
+						userselections.housesUS.value = tempHouses3(0) & tempHouses3(1)
+					Else
+						userselections.housesUS.value = tempHouses3(0)
+					End If
+					foundHouseString = 1
+					houses = userselections.housesUS.value
+				End If
+				objWord.Application.Quit
+				Set objWord = Nothing
+			End If
+			Set fso = Nothing
+
+			programNamesFound = 0
+			i=0
+			j=0
+			For Each File in GoodFiles
+				fileName = Left(File,(Len(File)-4))
+				Set objChkBx = document.getElementById("Box" & i)
+				If (objChkBx.Checked) Then
+					houses = houses & fileName & " "
+					programName(j) = fileName
+					programNamesFound = 1 
+					If (Right(File,3) = "EQU") Then
+						equipType(j) = "VHLC"
+					Else
+						equipType(j) = "ElectrologIXS"
+					End If
+					j = j + 1
+				End If
+				i = i + 1
+			Next
+			
+			If (houses = "") Then
+				a = ""
+				aUBound = 0
+			Else
+				a = Split(RTrim(houses)," ")
+				aUBound = UBound(a)
+			End If
+
+			programmerNameArray = Split(Programmer)
+			
+			'get program name
+			MicroLokII = 0
+			If (programNamesFound = 0) Then
+				Set objFSO = CreateObject("Scripting.FileSystemObject")
+				Dim objFolder
+				Set objFolder = objFSO.GetFolder(workingDir)
+				Dim objFile
+				i = 0
+				Do 
+					For Each objFile In objFolder.Files
+						If i > aUBound Then
+							Exit For
+						End If	
+						'only proceed if there is an extension on the file.
+						If (InStr(objFile.Name, ".") > 0) Then
+							If (UCase(Right(objFile.Name, 3)) = "EQU") Then
+								possibleProgramName = Replace(UCase(objFile.Name),".EQU","")
+								If (houses = "") Then
+									equipType(i) = "VHLC"
+									programName(i) = possibleProgramName
+									programNamesFound = 1
+									i = i + 1
+								Elseif (UCase(Right(possibleProgramName,1)) = UCase(a(i))) Or (UCase(Right(possibleProgramName,2)) = UCase(a(i)) & "V") Then
+									equipType(i) = "VHLC"
+									programName(i) = possibleProgramName
+									programNamesFound = 1
+									i = i + 1			
+								End If
+							Elseif (Right(objFile.Name, 3) = "ccf") Then
+								possibleProgramName = Replace(objFile.Name,".ccf","")
+								If (houses = "") Then
+									equipType(i) = "ElectrologIXS"
+									programName(i) = possibleProgramName
+									programNamesFound = 1
+									i = i + 1
+								Elseif (UCase(Right(possibleProgramName,1)) = UCase(a(i))) Then
+									equipType(i) = "ElectrologIXS"
+									programName(i) = possibleProgramName
+									programNamesFound = 1
+									i = i + 1
+								End If
+							Elseif (UCase(Right(objFile.Name, 3) = "ML2")) Then
+								possibleProgramName = Replace(objFile.Name,".ML2","")
+								If (houses = "") Then
+									equipType(i) = "MicroLokII"
+									MicroLokII = 1
+									programName(i) = possibleProgramName
+									programNamesFound = 1
+									i = i + 1
+								Elseif (UCase(Right(possibleProgramName,1)) = UCase(a(i))) Then
+									equipType(i) = "MicroLokII"
+									MicroLokII = 1
+									programName(i) = possibleProgramName
+									programNamesFound = 1
+									i = i + 1
+								End If
+							End If
+						End If
+					Next
+					If programNamesFound = 0 Then
+						If (houses = "") Then
+							MsgBox("Can not find the software. Please try again and check to make sure the in-service software has the appropriate files present when placing in to the RTVP folder (*.ML2, *.EQU, or *.ccf).")
+						Else
+							MsgBox("Can not recognize the software for the " & UCase(a(i)) & " House. Please try again and check to make sure the in-service software has the appropriate files present when placing in to the RTVP folder (*.ML2, *.EQU, or *.ccf).")
+						End If
+						IntentionallyStopRTV(newSrcFldr)
+						Exit Sub
+					End If
+					programNamesFound = 0
+				Loop While Not i > aUBound
+				Set objFSO = Nothing
+			End If
+			
+			'Create House String unless its already done
+			If Not foundHouseString = 1 Then
+				Select Case aUBound
+					Case 0
+						If (houses = "") Then
+						Else
+							houseOrHouses = "Program "
+							housesString = a(0)
+						End If
+					Case 1
+						houseOrHouses = "Programs "
+						housesString = a(0)
+						housesString = housesString & " and " & a(1)
+					Case else
+						houseOrHouses = "Programs "
+						housesString = a(0)
+						for i = 1 To aUBound-1
+							housesString = housesString & ", " & a(i) 
+						Next
+						housesString = housesString & ", and " & a(aUBound)
+				End Select
+			End If
+			
+			For i = 0 To aUBound
+				If equipType(i) = "VHLC" or equipType(i) = "MicroLokII" Then
+					programNameString = programNameString & programName(i) & vbCrLf
+				Else
+					programNameString = programNameString & programName(i) & ".ccf" & vbCrLf
+				End If
+			Next
+			
+			If Not userselections.NonVitalRTVP.Checked Then
+				For i = 0 To aUBound
+					If equipType(i) = "VHLC" Then
+						result = MsgBox ("If this computer is running Windows 7, disabling the video card is required for the VBU to work. Disable video card?", vbYesNo, "Disable Video Card")
+						Select Case result
+						Case vbYes
+							setVideoCard("disable")
+							VcardDisabled = 1
+						Case vbNo
+							objTxtArea.Value = objTxtArea.Value & getTimeStamp() & "You chose ""no"" to disabling the video card. The RTVP will now be aborted to avoid crashing the computer." & VbCrLf																 
+							objTxtArea.scrollTop = objTxtArea.scrollHeight + objTxtArea.scrollTop
+							IntentionallyStopRTV(newSrcFldr)
+							Exit Sub
+						End Select
+						Exit For
+					End If
+				Next
+			End If
+			
+			objTxtArea.Value = objTxtArea.Value & getTimeStamp() & VbCrLf _
+																 & vbTab & "Programmer: " & programmer & VbCrLf _
+															       & vbTab & "Railroad Number: " & csx & VbCrLf _
+															         & vbTab & "Xorail Number: " & xrl & VbCrLf _
+														  & vbTab & "Working Directory: " & workingDir & VbCrLf _
+																         & vbTab & "Division: " & dvsn & VbCrLf _
+											& vbTab & "Subdivision: " & sdvsn & " (" & sdvsnAbrv & ")" & VbCrLf _
+																			  & vbTab & "State: " & st & VbCrLf _
+																       & vbTab & "Mile Post: " & mPost & VbCrLf _
+																     & vbTab & "Location Name: " & loc & VbCrLf _
+							   & vbTab & "Program Names: " & Replace(programNameString, VbCrLf, vbTab) & VbCrLf '_
+							                              '& vbTab & "City, State: " & city & ", " & st & VbCrLf _
+																 '& vbTab & "Programmer: " & programmer & VbCrLf _
+																 '& vbTab & "Programmer: " & programmer & VbCrLf _
+																 '& vbTab & "Programmer: " & programmer & VbCrLf _
+																 '& vbTab & "Programmer: " & programmer & VbCrLf _
+																 '& vbTab & "Programmer: " & programmer & VbCrLf _
+																 '& vbTab & "Programmer: " & programmer & VbCrLf _
+																 '& vbTab & "Programmer: " & programmer & VbCrLf _
+																 '& vbTab & "Programmer: " & programmer & VbCrLf																 
+			objTxtArea.scrollTop = objTxtArea.scrollHeight + objTxtArea.scrollTop
+			
+			For i = 0 To aUBound
+				Do	
+					VitalRTVPchanges(i) = 1
+					NonVitalRTVPchanges(i) = 1
+					Set RTVfso = CreateObject("Scripting.FileSystemObject")
+					If SrcFldrAlreadyExisted = 1 Then 
+						If equipType(i) = "VHLC" or equipType(i) = "MicroLokII" Then
+							If Not userselections.NonVitalRTVP.Checked Then 
+								If (houses = "") Then
+									result = MsgBox ("Were vital changes made to the existing RTVP for this software?", vbYesNo, "Vital Changes?")
+								Else
+									result = MsgBox ("Were vital changes made to the existing RTVP for the " & a(i) & " software?", vbYesNo, "Vital Changes?")
+								End If
+							Else
+								result = vbNo
+							End If
+							Select Case result
+							Case vbYes
+							Case vbNo
+								If (houses = "") Then
+									result = MsgBox ("Were Non-Vital changes made to the existing RTVP for this software?", vbYesNo, "Non-Vital Changes?")
+								Else
+									result = MsgBox ("Were non-vital changes made to the existing RTVP for the " & a(i) & " software?", vbYesNo, "Non-Vital Changes?")
+								End If
+								Select Case result
+								Case vbYes
+										VitalRTVPchanges(i) = 0
+								Case vbNo
+									VitalRTVPchanges(i) = 0
+									NonVitalRTVPchanges(i) = 0
+									Exit Do
+								End Select
+							End Select
+						ElseIf equipType(i) = "ElectrologIXS" Then
+							If (houses = "") Then
+								result = MsgBox ("Were changes made to the existing RTVP for this software?", vbYesNo, "Software Changes?")
+							Else
+								result = MsgBox ("Were changes made to the existing RTVP for the " & a(i) & " software?", vbYesNo, "Software Changes?")
+							End If
+							Select Case result
+							Case vbYes
+							Case vbNo
+								VitalRTVPchanges(i) = 0
+								NonVitalRTVPchanges(i) = 0
+								Exit Do
+							End Select
+						End If
+					End If
+					
+					If (houses = "") Then
+						currentBox = ""
+						objTxtArea.Value = objTxtArea.Value & getTimeStamp() & "This program will guide you through the " & equipType(i) & " RTV procedure for the """ & programName(i) & """ software and move/create all the necessary files/folders throughout the process. NOTE: All checked vital and non vital files must be in the working directory prior to beginning this procedure." & VbCrLf
+						objTxtArea.scrollTop = objTxtArea.scrollHeight + objTxtArea.scrollTop
+						RTVdir = workingDir & "\RTVP"
+					Else
+						currentBox = a(i)
+						objTxtArea.Value = objTxtArea.Value & getTimeStamp() & "This program will guide you through the " & equipType(i) & " RTV procedure for the " & a(i) & " software and move/create all the necessary files/folders throughout the process. NOTE: All checked vital and non vital files must be in the working directory prior to beginning this procedure." & VbCrLf
+						objTxtArea.scrollTop = objTxtArea.scrollHeight + objTxtArea.scrollTop
+						If (Len(a(i)) > 1) Then 
+							a(i) = InputBox("Enter the RTVP folder name if RTVP_" & a(i) & " is not desirable. This name also appears in the letter to the customer.", "RTVP folder Name", a(i))
+							RTVdir = workingDir & "\RTVP_" & a(i)
+						Else
+							RTVdir = workingDir & "\RTVP_" & UCase(a(i))
+						End If
+					End If
+						
+					If VitalRTVPchanges(i) = 1 Then	
+						If Not RTVfso.FolderExists(RTVdir) Then
+							RTVfso.CreateFolder RTVdir
+						Else	
+							Set folder = RTVfso.GetFolder(RTVdir)
+							For Each f In folder.SubFolders
+								f.Delete True
+							Next
+							for each f in folder.Files
+							   f.Delete True
+							Next
+						End If
+						
+						If equipType(i) = "VHLC" or equipType(i) = "MicroLokII" Then
+							If (houses = "") Then								
+								dialogBoxInstructionString = "Browse for in-service vital software."
+							Else
+								dialogBoxInstructionString = "Browse for in-service " & a(i) & " vital software."
+							End If
+						Else
+							If (houses = "") Then
+								dialogBoxInstructionString = "Browse for in-service software."
+							Else
+								dialogBoxInstructionString = "Browse for in-service " & a(i) & " software."
+							End If
+						End If
+						inServiceFilesDirectory = getInServiceFolder(workingDir, dialogBoxInstructionString)
+						'copy files from In Service dir ---> RTVP working dir
+						set filesys = CreateObject("Scripting.FileSystemObject")
+						If filesys.FolderExists(inServiceFilesDirectory) Then
+							Set objFolder = filesys.GetFolder(inServiceFilesDirectory)
+							renameFiles = 0
+							For Each objFile In objFolder.Files
+								If (InStr(UCase(objFile.Name), UCase(programName(i))) = 1) Or (renameFiles = 1) And (Right(UCase(objFile.Name), 3) <> "ZIP") Then 
+									If equipType(i) = "VHLC" Then
+										'RTVfso.CopyFile inServiceFilesDirectory & "\" & objFile.Name, RTVdir & "\" & UCase(objFile.Name)
+										Call CopyMyFile(objFile.Name, inServiceFilesDirectory, RTVdir & "\" & UCase(objFile.Name))
+									Else
+										'RTVfso.CopyFile inServiceFilesDirectory & "\" & objFile.Name, RTVdir & "\" & objFile.Name
+										Call CopyMyFile(objFile.Name, inServiceFilesDirectory, RTVdir & "\" & objFile.Name)
+									End If
+									'if the file extension is .b1 and its the nv b1 then the .ccf file will have the same name without nv on the end so we are sure its the nonvital b1 file
+									If (Right(objFile.Name, 5) = "nv.b1") And filesys.FileExists(inServiceFilesDirectory & "\" & Left(objFile.Name, Len(objFile.Name) - 5) & ".ccf") Then
+										'RTVfso.CopyFile inServiceFilesDirectory & "\" & objFile.Name, userselections.sourceDirPath.value & "\old " & programName(i) & "nv.b1"
+										Call CopyMyFile(objFile.Name, inServiceFilesDirectory, userselections.sourceDirPath.value & "\old " & programName(i) & "nv.b1")
+									'if the file extension is .b1 and its the v b1 then the .ccf file will have the same name without v on the end so we are sure its the vital b1 file
+									Elseif (Right(objFile.Name, 4) = "v.b1") And filesys.FileExists(inServiceFilesDirectory & "\" & Left(objFile.Name, Len(objFile.Name) - 4) & ".ccf") Then
+										'RTVfso.CopyFile inServiceFilesDirectory & "\" & objFile.Name, userselections.sourceDirPath.value & "\old " & programName(i) & "v.b1"
+										Call CopyMyFile(objFile.Name, inServiceFilesDirectory, userselections.sourceDirPath.value & "\old " & programName(i) & "v.b1")
+									Elseif (Right(objFile.Name,3) = "B14") Then
+										'RTVfso.CopyFile inServiceFilesDirectory & "\" & objFile.Name, userselections.sourceDirPath.value & "\old " & UCase(programName(i)) & ".B14"
+										Call CopyMyFile(objFile.Name, inServiceFilesDirectory, userselections.sourceDirPath.value & "\old " & UCase(programName(i)) & ".B14")
+									Elseif (Right(objFile.Name,3) = "B15") Then
+										'RTVfso.CopyFile inServiceFilesDirectory & "\" & objFile.Name, userselections.sourceDirPath.value & "\old " & UCase(programName(i)) & ".B15"
+										Call CopyMyFile(objFile.Name, inServiceFilesDirectory, userselections.sourceDirPath.value & "\old " & UCase(programName(i)) & ".B15")
+									End If
+								Elseif (renameFiles = 0) And Not (( objFile.Name = "ValidateLog.txt") Or (Right(objFile.Name, 4) = "sats") Or ( objFile.Name = "Thumbs.db") Or (UCase(Right(objFile.Name, 3) = "ERR"))) Then
+									renameFilesQuestion = MsgBox(objFile.Name & " and " & programName(i) & " do not match. Are these the correct files? IF 'YES' is chosen, THE FILES FROM THE PREVIOUSLY SELECTED FOLDER WILL BE RENAMED. If 'no' is chosen, the process will be stopped and will need to be restarted." , vbYesNo, "Files Correct?")
+									If (renameFilesQuestion = vbNo) Then
+										IntentionallyStopRTV(newSrcFldr)
+										Exit Sub
+									Else
+										'RTVfso.CopyFile inServiceFilesDirectory & "\" & objFile.Name, RTVdir & "\" & objFile.Name
+										Call CopyMyFile(objFile.Name, inServiceFilesDirectory, RTVdir & "\" & objFile.Name)
+										renameFiles = 1
+									End If
+								End If
+							Next
+						Else
+							objTxtArea.Value = objTxtArea.Value & getTimeStamp() & "Process terminated. Please try again with a valid folder." & VbCrLf																 
+							objTxtArea.scrollTop = objTxtArea.scrollHeight + objTxtArea.scrollTop
+							IntentionallyStopRTV(newSrcFldr)
+							Exit Sub
+						End If
+						set filesys = Nothing
+					End If
+					If equipType(i) = "VHLC" Then
+						oldVitalProgName = GetOldVitalProgramName(RTVdir, equipType(i))
+						If oldVitalProgName = "File Not Found" Then
+							MsgBox("The RTVP creator could not find an .EQU file in the directory chosen (" & inServiceFilesDirectory & "). Please run the validator in this directory and try again.")
+							IntentionallyStopRTV(newSrcFldr)
+							Exit Sub
+						End If
+						If VitalRTVPchanges(i) = 1 Then
+							RTVprocedureSigHeight = 565
+							RTVdirInService = RTVdir & "\In Service"
+							logSuffix(i) = ".LOG"
+							If StrComp(programName(i), oldVitalProgName) = 0 Then
+								VitalCrcSumArray = getLastVitalSumAndCrc(RTVdir, programName(i))
+							Else
+								VitalCrcSumArray = getLastVitalSumAndCrc(RTVdir, oldVitalProgName)
+								Set objFSO = CreateObject("Scripting.FileSystemObject")
+								Set objFolder = objFSO.GetFolder(RTVdir)
+								For Each objFile In objFolder.Files
+									If (InStr(UCase(objFile.Name), UCase(oldVitalProgName)) <> 0) Then
+										objFile.Name = Replace(objFile.Name, oldVitalProgName, programName(i))
+									End If
+								Next
+								Set objFSO = Nothing
+								objTxtArea.Value = objTxtArea.Value & getTimeStamp() & "Renamed the in-service software from """ & oldVitalProgName & """ to """ & programName(i) & """." & VbCrLf																 
+								objTxtArea.scrollTop = objTxtArea.scrollHeight + objTxtArea.scrollTop
+								Delay(1)
+							End If
+							OldConsCrc(i) = VitalCrcSumArray(0)
+							OldConsSum(i) = VitalCrcSumArray(1)
+							OldVitalCrcFromCons(i) = VitalCrcSumArray(2)			
+							OldVitalSumFromCons(i) = VitalCrcSumArray(3)
+							RTVfso.CreateFolder RTVdirInService
+							Set objFolder = RTVfso.GetFolder(RTVdir)
+							
+							'ask if there are NV changes and read LOG if there are
+							If (houses = "") Then
+								NVFilesMessage = "Browse for exisiting (in service) NON VITAL 'LOG' and 'ALL' files."
+							Else
+								NVFilesMessage = "Browse for exisiting (in service) NON VITAL " & a(i) & " 'LOG' and 'ALL' files."								
+							End If
+							NVChanges(i) = SelectNonVitalFiles(RTVdir, NVFilesMessage, "*.ALL;*.LOG")
+							
+							If NVChanges(i) = vbNo Then
+								NonVitalRTVPchanges(i) = 0
+							End If
+						End If
+						If NVChanges(i) = vbYes Or NonVitalRTVPchanges(i) = 1 Then
+							If NonVitalRTVPchanges(i) = 1 And VitalRTVPchanges(i) = 0 Then
+								objTxtArea.Value = objTxtArea.Value & getTimeStamp() & "Browse for old NV Log file for this software: " & programName(i) & "." & VbCrLf																 
+								objTxtArea.scrollTop = objTxtArea.scrollHeight + objTxtArea.scrollTop
+								Delay(1)
+
+								NonVitalLogFile = SelectNonVitalLogFile("Select in service Non-Vital '.LOG' File")
+								fileString = NonVitalLogFile(1)
+								If (NonVitalLogFileName = "NO_FILE") Then
+									MsgBox("No NV LOG file was selected. The RTV process will now stop.")
+									IntentionallyStopRTV(newSrcFldr)
+								Else
+									NonVitalCrcSumArray = getLastNonVitalSumAndCrcFromThisFile(fileString)
+								End If					
+							Else								
+								If (programName(i) = oldVitalProgName) Then
+									NonVitalCrcSumArray = getLastNonVitalSumAndCrc(RTVdir, programName(i))
+								Else
+									NonVitalCrcSumArray = getLastNonVitalSumAndCrc(RTVdir, oldVitalProgName)
+								End If
+							End If
+							OldNonVitalCrc1(i) = NonVitalCrcSumArray(0)
+							OldNonVitalSum1(i) = NonVitalCrcSumArray(1)
+							OldNonVitalCrc2(i) = NonVitalCrcSumArray(2)
+							OldNonVitalSum2(i) = NonVitalCrcSumArray(3)
+							NonVitalName(i) = Left(NonVitalCrcSumArray(4),InStr(NonVitalCrcSumArray(4),".") - 1)
+							programNameString = programNameString & NonVitalName(i) & vbCrLf
+							If NonVitalRTVPchanges(i) = 1 And VitalRTVPchanges(i) = 0 Then
+								RTVfso.CopyFile fileString, RTVdirInService & "\" & NonVitalName(i) & ".ALL"
+							Else
+								RTVfso.MoveFile RTVdir & "\" & NonVitalName(i) & ".ALL", RTVdirInService & "\" & NonVitalName(i) & ".ALL"
+							End If
+						Else
+							OldNonVitalCrc1(i) = "N/A "
+							OldNonVitalSum1(i) = "N/A "
+							OldNonVitalCrc2(i) = "N/A "
+							OldNonVitalSum2(i) = "N/A "
+						End If
+						
+						If VitalRTVPchanges(i) = 1 Then
+							'copy files from Working dir ---> RTVP working dir except log 
+							For Each objFile In objFolder.Files
+								If (InStr(UCase(objFile.Name), UCase(programName(i))) = 1) And Not (Right(UCase(objFile.Name),3) = "LOG") Then 
+									'RTVfso.CopyFile RTVdir & "\" & objFile.Name, RTVdirInService & "\" & objFile.Name
+									Call CopyMyFile(objFile.Name, RTVdir, RTVdirInService & "\" & objFile.Name)
+								End If
+							Next
+							'RTVfso.CopyFile valDirPrefix & "\" & "VBU1_3.EXE", RTVdir & "\" & "VBU1_3.EXE"
+							Call CopyMyFile("VBU1_3.EXE", valDirPrefix, RTVdir & "\" & "VBU1_3.EXE")
+						End If
+					Elseif equipType(i) = "ElectrologIXS" And VitalRTVPchanges(i) = 1 Then
+						RTVprocedureSigHeight = 575
+						logSuffix(i) = "v.log"
+						
+						oldVitalProgName = GetOldVitalProgramName(RTVdir, equipType(i))
+						If oldVitalProgName = "File Not Found" Then
+							MsgBox("The RTVP creator could not find a .ccf file in the directory chosen (" & inServiceFilesDirectory & "). Please check the files in this directory and try again.")
+							IntentionallyStopRTV(newSrcFldr)
+							Exit Sub
+						End If
+						If oldVitalProgName = "" Then
+							objTxtArea.Value = objTxtArea.Value & getTimeStamp() & "The correct files were not provided. The RTVP Creator will now stop. Please try again." & VbCrLf																 
+							objTxtArea.scrollTop = objTxtArea.scrollHeight + objTxtArea.scrollTop
+							IntentionallyStopRTV(newSrcFldr)
+							Exit Sub
+						End If
+						If (programName(i) = oldVitalProgName) Then
+							If (houses = "") Then
+								oldConsResults = readConsFile("old", a, programName(i), loc, workingDir, newSrcFldr, RTVPcreatorRootDir)
+							Else
+								oldConsResults = readConsFile("old", a(i), programName(i), loc, workingDir, newSrcFldr, RTVPcreatorRootDir)
+							End If
+							
+							If Err.Number <> 0 Then
+								Err.Clear
+								IntentionallyStopRTV(newSrcFldr)
+								Exit Sub
+							End If
+							
+						Else
+							If (houses = "") Then
+								oldConsResults = readConsFile("old", a, oldVitalProgName, loc, workingDir, newSrcFldr, RTVPcreatorRootDir)
+							Else
+								oldConsResults = readConsFile("old", a(i), oldVitalProgName, loc, workingDir, newSrcFldr, RTVPcreatorRootDir)
+							End If
+							
+							If Err.Number <> 0 Then
+								Err.Clear
+								IntentionallyStopRTV(newSrcFldr)
+								Exit Sub
+							End If
+							
+							Set objFSO = CreateObject("Scripting.FileSystemObject")
+							Set objFolder = objFSO.GetFolder(RTVdir)
+							For Each objFile In objFolder.Files
+								If (InStr(objFile.Name, oldVitalProgName) <> 0) Then
+									objFile.Name = Replace(objFile.Name, oldVitalProgName, programName(i))
+								End If
+							Next
+							Set objFSO = Nothing
+							objTxtArea.Value = objTxtArea.Value & getTimeStamp() & "Renamed the in-service software from """ & oldVitalProgName & """ to """ & programName(i) & """." & VbCrLf																 
+							objTxtArea.scrollTop = objTxtArea.scrollHeight + objTxtArea.scrollTop
+							Delay(1)
+						End If
+						OldConsSum(i) = oldConsResults(0)
+						OldConsCrc(i) = oldConsResults(1)
+						oldVitalSumFromCons(i) = oldConsResults(2)
+						oldVitalCrcFromCons(i) = oldConsResults(3)
+						OldNonVitalSum1(i) = oldConsResults(4)
+						OldNonVitalCrc1(i) = oldConsResults(5)
+					End If
+					If VitalRTVPchanges(i) = 1 Then
+						inServiceValCrc(i) = getLastLogValCrc(RTVdir, programName(i), logSuffix(i))
+						
+						workingDir = "C" & Right(workingDir, Len(workingDir) - 1)
+						set filesys = CreateObject("Scripting.FileSystemObject")
+						If filesys.FolderExists("C" & Right(RTVdir, Len(RTVdir) - 1)) Then
+							filesys.DeleteFolder "C" & Right(RTVdir, Len(RTVdir) - 1)
+						End If
+						filesys.CopyFolder RTVdir, workingDir & "\"
+						set filesys = Nothing
+						RTVdir = "C" & Right(RTVdir, Len(RTVdir) - 1)
+						
+						'first compile
+						Do 
+							programNameSpaceToTilde(i) = Replace(programName(i), " ", "~")
+							Set WshShell = CreateObject("WScript.Shell")
+							If equipType(i) = "VHLC" Then
+								compilerAndFilePath = compilerPathVHLC & " " & userselections.manualCompile.checked & " " & RTVdir & "\" & programName(i) & ".LOC"
+								WshShell.Run "compileVHLC.exe " & compilerAndFilePath, 1, True
+							Elseif equipType(i) = "ElectrologIXS" Then
+								Delay(CompileWaitTime(0))
+								WshShell.Run "compileELGX.exe " & userselections.logicStationVersion.value & " " & userselections.manualCompile.checked & " " & programNameSpaceToTilde(i) & " " & RTVdir, 1, True
+							End If
+							Set WshShell = Nothing
+							RecompiledInServiceValCrc(i) = getLastLogValCrc(RTVdir, programName(i), logSuffix(i))
+						Loop While inServiceValCrc(i) <> RecompiledInServiceValCrc(i)
+						objTxtArea.Value = objTxtArea.Value & getTimeStamp() & "Successfully recompiled the in-service software for """ & programName(i) & """ and retained it's validation CRC." & VbCrLf																 
+						objTxtArea.scrollTop = objTxtArea.scrollHeight + objTxtArea.scrollTop
+						Delay(1)
+						
+						'first compile's validation
+						Do 
+							Set WshShell = CreateObject("WScript.Shell")
+							If (equipType(i) = "VHLC") Then
+								Set fso = CreateObject("Scripting.FileSystemObject")
+								If fso.FileExists(RTVdir & "\" & programName(i) & ".H15") Then
+									validatorAndFilePath = validatorPathVHLC & " " & programName(i) & ".H14 " & programName(i) & ".H15 " & RTVdir
+									WshShell.Run "validateVHLC.exe " & validatorAndFilePath, 1, True		
+								Else
+									validatorAndFilePath = validatorPathVHLC & " " & programName(i) & ".H14 " & "N/A " & RTVdir
+									WshShell.Run "validateVHLC.exe " & validatorAndFilePath, 1, True
+								End If			
+								Set fso = Nothing
+							Elseif equipType(i) = "ElectrologIXS" Then
+								WshShell.Run "validateELGX.exe " & userselections.logicStationVersion.value & programNameSpaceToTilde(i) & " " & RTVdir, 1, True
+							End If
+							Set WshShell = Nothing	
+							valFileValidationCrc(i) = getValFileValidationCrc(RTVdir, programName(i), equipType(i))
+							If RecompiledInServiceValCrc(i) <> valFileValidationCrc(i) Then
+								MsgBox("val file does not match log file")
+							End If
+						Loop While RecompiledInServiceValCrc(i) <> valFileValidationCrc(i)
+						objTxtArea.Value = objTxtArea.Value & getTimeStamp() & "Successfully validated the recompiled in-service software for """ & programName(i) & """ and obtained the same validation CRC as the compile." & VbCrLf
+						objTxtArea.scrollTop = objTxtArea.scrollHeight + objTxtArea.scrollTop
+
+						
+						If equipType(i) = "VHLC" Then
+							Set WshShell = CreateObject("WScript.Shell")
+							VBUAndFilePath = "b " & "o " & " " & userselections.manualCompile.checked & " " & programName(i) & " " & RTVdir
+							savedString = objTxtArea.Value
+							objTxtArea.Value = "Run the VBU on the vital software in " & RTVdir & ", choosing the 'Backup' and 'Old' options. Program name is " & programName(i) & "."
+							objTxtArea.scrollTop = objTxtArea.scrollHeight + objTxtArea.scrollTop
+							WshShell.Run "runVBU.exe " & VBUAndFilePath, 1, True
+							Set WshShell = Nothing
+							objTxtArea.Value = savedString & getTimeStamp() & "Ran the VBU to BACKUP the OLD to P:\_BACKUP.DIR\" & programName(i) & ".DIR\_OLDLOC.DIR for the """ & programName(i) & """ software in " & RTVdir & "." & VbCrLf
+							objTxtArea.scrollTop = objTxtArea.scrollHeight + objTxtArea.scrollTop
+							Delay(1)
+						Elseif 	equipType(i) = "ElectrologIXS" Then
+							'create backup folder
+							RTVbackUpDir = RTVdir & "\Backup"
+							RTVfso.CreateFolder RTVbackUpDir
+						End If
+						
+						'move files from RTVP dir ---> RTVP\Backup and copy log (not "move")
+						Delay(CompileWaitTime(1))
+						Set objFSO = CreateObject("Scripting.FileSystemObject")
+						If equipType(i) = "ElectrologIXS" Then
+							Set objFolder = objFSO.GetFolder(RTVdir)
+							For Each objFile In objFolder.Files
+								If (InStr(objFile.Name, programName(i)) = 1) And Not (Right(objFile.Name, 3) = "log") Then   
+									objFSO.MoveFile RTVdir & "\" & objFile.Name, RTVbackUpDir & "\" & objFile.Name
+								Elseif (Right(objFile.Name, 3) = "log") Then
+									'objFSO.CopyFile RTVdir & "\" & objFile.Name, RTVbackUpDir & "\" & objFile.Name
+									Call CopyMyFile(objFile.Name, RTVdir, RTVbackUpDir & "\" & objFile.Name)
+								End If
+							Next	
+						End If
+						
+						'copy files from Working dir ---> RTVP working dir except log 
+						Set objFolder = objFSO.GetFolder(workingDir)
+						If equipType(i) = "VHLC" Then
+							For Each objFile In objFolder.Files
+								If (InStr(UCase(objFile.Name), UCase(programName(i))) = 1) And Not (UCase(Right(objFile.Name,3)) = "LOG") Then 
+									'objFSO.CopyFile workingDir & "\" & objFile.Name, RTVdir & "\" & UCase(objFile.Name)
+									Call CopyMyFile(objFile.Name, workingDir, RTVdir & "\" & UCase(objFile.Name))
+								End If
+							Next
+						Elseif equipType(i) = "ElectrologIXS" Then
+							For Each objFile In objFolder.Files
+								If (InStr(objFile.Name, programName(i)) = 1) And Not (UCase(Right(objFile.Name,3)) = "LOG") Then 
+									'objFSO.CopyFile workingDir & "\" & objFile.Name, RTVdir & "\" & objFile.Name
+									Call CopyMyFile(objFile.Name, workingDir, RTVdir & "\" & objFile.Name)
+								End If
+							Next
+						End If
+						
+						'compile and validate the new program (after changes) and make sure the log file and val file validation crc's match
+						Set WshShell = CreateObject("WScript.Shell")
+						If equipType(i) = "VHLC" Then
+							compilerAndFilePath = compilerPathVHLC & " " & userselections.manualCompile.checked & " " & RTVdir & "\" & programName(i) & ".LOC"
+							WshShell.Run "compileVHLC.exe " & compilerAndFilePath, 1, True
+						Elseif equipType(i) = "ElectrologIXS" Then
+							Delay(CompileWaitTime(0))
+							WshShell.Run "compileELGX.exe " & userselections.logicStationVersion.value & " " & userselections.manualCompile.checked & " " & programNameSpaceToTilde(i) & " " & RTVdir, 1, True
+						End If
+						Set WshShell = Nothing
+						newValCrc(i) = getLastLogValCrc(RTVdir, programName(i), logSuffix(i))
+						objTxtArea.Value = objTxtArea.Value & getTimeStamp() & "Compiled changes to """ & programName(i) & """ to be included in the RTVP." & VbCrLf																 
+						objTxtArea.scrollTop = objTxtArea.scrollHeight + objTxtArea.scrollTop
+						Delay(1)
+						Do
+							Set WshShell = CreateObject("WScript.Shell")
+							If (equipType(i) = "VHLC") Then
+								Set fso = CreateObject("Scripting.FileSystemObject")
+								If fso.FileExists(RTVdir & "\" & programName(i) & ".H15") Then
+									validatorAndFilePath = validatorPathVHLC & " " & programName(i) & ".H14 " & programName(i) & ".H15 " & RTVdir
+									WshShell.Run "validateVHLC.exe " & validatorAndFilePath, 1, True			
+								Else
+									validatorAndFilePath = validatorPathVHLC & " " & programName(i) & ".H14 " & "N/A " & RTVdir
+									WshShell.Run "validateVHLC.exe " & validatorAndFilePath, 1, True	
+								End If
+								Set fso = Nothing
+							Elseif equipType(i) = "ElectrologIXS" Then
+								WshShell.Run "validateELGX.exe " & userselections.logicStationVersion.value & programNameSpaceToTilde(i) & " " & RTVdir, 1, True
+							End If
+							Set WshShell = Nothing
+							newValFileValidationCrc(i) = getValFileValidationCrc(RTVdir, programName(i), equipType(i))
+							If newValCrc(i) <> newValFileValidationCrc(i) Then
+								MsgBox("val file does not match log file")
+							End If
+						Loop While newValCrc(i) <> newValFileValidationCrc(i)
+						objTxtArea.Value = objTxtArea.Value & getTimeStamp() & "Validated the compiled changes to """ & programName(i) & """ and obtained the same validation CRC as the ""changes"" compile." & VbCrLf																 
+						objTxtArea.scrollTop = objTxtArea.scrollHeight + objTxtArea.scrollTop
+						Delay(1)
+						
+						'create difference directory, copy all files from Backup dir and place into Diff dir with the exception of ".b1" files which come from the RTVworking dir
+						If equipType(i) = "ElectrologIXS" Then
+							RTVdiffDir = RTVdir & "\Difference"
+							RTVfso.CreateFolder RTVdiffDir
+							diffRptFileExtension = "v.dfr"
+							Set objFolder = objFSO.GetFolder(RTVbackUpDir)
+							For Each objFile In objFolder.Files
+								If (InStr(objFile.Name, programName(i)) = 1) And Not (Right(objFile.Name,3) = ".b1") Then 
+									'objFSO.CopyFile RTVbackUpDir & "\" & objFile.Name, RTVdiffDir & "\" & objFile.Name
+									Call CopyMyFile(objFile.Name, RTVbackUpDir, RTVdiffDir & "\" & objFile.Name)
+								Elseif (Right(objFile.Name, 3) = ".b1") Then
+									'objFSO.CopyFile RTVdir & "\" & objFile.Name, RTVdiffDir & "\" & objFile.Name
+									Call CopyMyFile(objFile.Name, RTVdir, RTVdiffDir & "\" & objFile.Name)
+									'objFSO.CopyFile RTVdir & "\" & objFile.Name, userselections.sourceDirPath.value & "\new " & objFile.Name
+									Call CopyMyFile(objFile.Name, RTVdir, userselections.sourceDirPath.value & "\new " & objFile.Name)
+								End If
+							Next
+							FontSize = 10.5
+						Elseif equipType(i) = "VHLC" Then
+							Set objFolder = objFSO.GetFolder(RTVdir)
+							For Each objFile In objFolder.Files
+								If (Right(objFile.Name, 3) = "B14") Or (Right(objFile.Name, 3) = "B15") Then 
+									'objFSO.CopyFile RTVdir & "\" & objFile.Name, userselections.sourceDirPath.value & "\new " & objFile.Name
+									Call CopyMyFile(objFile.Name, RTVdir, userselections.sourceDirPath.value & "\new " & objFile.Name)
+								End If
+							Next
+							Set WshShell = CreateObject("WScript.Shell")
+							VBUAndFilePath = "b " & "n " & " " & userselections.manualCompile.checked & " " & programName(i) & " " & RTVdir
+							savedString = objTxtArea.Value
+							objTxtArea.Value = "Run the VBU on the vital software in " & RTVdir & ", choosing the 'Backup' and 'New' options."
+							objTxtArea.scrollTop = objTxtArea.scrollHeight + objTxtArea.scrollTop
+							WshShell.Run "runVBU.exe " & VBUAndFilePath, 1, True
+							Set WshShell = Nothing
+							objTxtArea.Value = savedString & getTimeStamp() & "Ran the VBU to BACKUP the NEW to P:\_BACKUP.DIR\" & programName(i) & ".DIR\_NEWLOC.DIR for the """ & programName(i) & """ software in " & RTVdir & "." & VbCrLf
+							objTxtArea.scrollTop = objTxtArea.scrollHeight + objTxtArea.scrollTop
+							
+							Set WshShell = CreateObject("WScript.Shell")
+							savedString = objTxtArea.Value
+							objTxtArea.Value = "Run the VBU on the vital software in " & RTVdir & ", choosing the 'Restore' and 'Old' options."
+							objTxtArea.scrollTop = objTxtArea.scrollHeight + objTxtArea.scrollTop
+							VBUAndFilePath = "r " & "o " & " " & userselections.manualCompile.checked & " " & programName(i) & " " & RTVdir
+							WshShell.Run "runVBU.exe " & VBUAndFilePath, 1, True
+							Set WshShell = Nothing
+							objTxtArea.Value = savedString & getTimeStamp() & "Ran the VBU to RESTORE the OLD to " & RTVdir & " for the """ & programName(i) & """ software from P:\_BACKUP.DIR\" & programName(i) & ".DIR\_OLDLOC.DIR." & VbCrLf
+							objTxtArea.scrollTop = objTxtArea.scrollHeight + objTxtArea.scrollTop
+							Delay(1)
+							
+							RTVdiffDir = RTVdir
+							diffRptFileExtension = ".ERR"
+							FontSize = 9
+						End If
+						
+						If (houses = "") Then
+							compareReportCurrentHouse = a
+						Else
+							compareReportCurrentHouse = a(i)
+						End If
+						'create V and NV diff and compare reports
+						Set WshShell = CreateObject("WScript.Shell")
+						Set fso = CreateObject("Scripting.FileSystemObject")
+						compareFilesPathSpaceToTilde = Replace(userselections.sourceDirPath.value, " ", "~")
+						outputFilePathSpaceToTilde = Replace(fso.GetParentFolderName(userselections.sourceDirPath.value), " ", "~")						
+						compareFolderPathsString = userselections.logicStationVersion.value & " " & equipType(i) & " " & programNameSpaceToTilde(i) & " " & compareFilesPathSpaceToTilde & " " & outputFilePathSpaceToTilde & " " & compareReportCurrentHouse
+						WshShell.Run "makeComparisonReport.exe " & compareFolderPathsString, 1, True
+						Set WshShell = Nothing
+						
+						ChangesRemovedCorrectly = True
+						Do  
+							'validate
+							Set WshShell = CreateObject("WScript.Shell")
+							If ChangesRemovedCorrectly Then
+								If (equipType(i) = "VHLC") Then
+									Set fso = CreateObject("Scripting.FileSystemObject")
+									If fso.FileExists(RTVdiffDir & "\" & programName(i) & ".H15") Then
+										validatorAndFilePath = validatorPathVHLC & " " & programName(i) & ".H14 " & programName(i) & ".H15 " & RTVdiffDir
+										WshShell.Run "validateVHLC.exe " & validatorAndFilePath, 1, True			
+									Else
+										validatorAndFilePath = validatorPathVHLC & " " & programName(i) & ".H14 " & "N/A " & RTVdiffDir
+										WshShell.Run "validateVHLC.exe " & validatorAndFilePath, 1, True	
+									End If
+									Set fso = Nothing
+								Elseif equipType(i) = "ElectrologIXS" Then
+									WshShell.Run "validateELGX.exe " & userselections.logicStationVersion.value & programNameSpaceToTilde(i) & " " & RTVdiffDir, 1, True
+								End If
+							Else
+								If (equipType(i) = "VHLC") Then
+									Set fso = CreateObject("Scripting.FileSystemObject")
+									If fso.FileExists(RTVcheckDir & "\" & programName(i) & ".H15") Then
+										validatorAndFilePath = validatorPathVHLC & " " & programName(i) & ".H14 " & programName(i) & ".H15 " & RTVcheckDir
+										WshShell.Run "validateVHLC.exe " & validatorAndFilePath, 1, True			
+									Else
+										validatorAndFilePath = validatorPathVHLC & " " & programName(i) & ".H14 " & "N/A " & RTVcheckDir
+										WshShell.Run "validateVHLC.exe " & validatorAndFilePath, 1, True	
+									End If
+									Set fso = Nothing
+								Elseif equipType(i) = "ElectrologIXS" Then
+									WshShell.Run "validateELGX.exe " & userselections.logicStationVersion.value & programNameSpaceToTilde(i) & " " & RTVcheckDir, 1, True
+								End If
+							End If
+							Set WshShell = Nothing
+							Delay(CompileWaitTime(1))
+							Set objWord1 = CreateObject("Word.Application")
+							objWord1.Visible = True	
+							If ChangesRemovedCorrectly Then
+								Set VdiffReport = objWord1.Documents.Open( RTVdiffDir & "\" & programName(i) & diffRptFileExtension)
+								If (houses = "") Then ' And equipType(i) = "VHLC" -- removed to fix problem.... may need again
+									VdiffOK = MsgBox ("Are these the expected vital software changes?", vbYesNo, "Differences Correct?")
+								Else
+									VdiffOK = MsgBox ("Are these the expected vital changes for the " & a(i) & " software?", vbYesNo, "Differences Correct?")
+								End If
+							Else
+								Set VdiffReport = objWord1.Documents.Open( RTVcheckDir & "\" & programName(i) & diffRptFileExtension)
+								VdiffReport.Saved = 1
+							End If
+							VdiffReport.PageSetup.TopMargin = objWord1.InchesToPoints(0.5)
+							VdiffReport.PageSetup.BottomMargin = objWord1.InchesToPoints(0.5)
+							VdiffReport.PageSetup.LeftMargin = objWord1.InchesToPoints(0.5)
+							VdiffReport.PageSetup.RightMargin = objWord1.InchesToPoints(0.5)
+							Set diffRange = VdiffReport.Range()
+							diffRange.Font.Name = "Courier New"
+							diffRange.Font.Size = FontSize
+							If ChangesRemovedCorrectly Then
+								VdiffReport.SaveAs newSrcFldr & "\06" & currentBox & " V " & loc & " Difference Report.doc", wdFormatDocument
+							End If
+							If (VdiffOK = vbNo) Then
+								VdiffReport.Close
+								objWord1.Application.Quit
+								Set objWord1 = Nothing
+								objTxtArea.Value = objTxtArea.Value & getTimeStamp() & "Process Terminated. Please try again. Difference report not showing correct changes." & VbCrLf																 
+								objTxtArea.scrollTop = objTxtArea.scrollHeight + objTxtArea.scrollTop
+								IntentionallyStopRTV(newSrcFldr)
+								Exit Sub
+							End If
+							
+							If equipType(i) = "ElectrologIXS" Then
+								Set objWord2 = CreateObject("Word.Application")
+								objWord2.Visible = True	
+								If ChangesRemovedCorrectly Then
+									Set NVdiffReport = objWord2.Documents.Open( RTVdiffDir & "\" & programName(i) & "nv.dfr")
+									If (houses = "") Then
+										NVdiffOK = MsgBox ("Are these the expected non-vital software changes?", vbYesNo, "Differences Correct?")
+									Else
+										NVdiffOK = MsgBox ("Are these the expected non-vital changes for the " & a(i) & " software?", vbYesNo, "Differences Correct?")
+									End If
+								Else
+									Set NVdiffReport = objWord2.Documents.Open( RTVcheckDir & "\" & programName(i) & "nv.dfr")
+									NVdiffReport.Saved = 1
+								End If
+								NVdiffReport.PageSetup.TopMargin = objWord2.InchesToPoints(0.5)
+								NVdiffReport.PageSetup.BottomMargin = objWord2.InchesToPoints(0.5)
+								NVdiffReport.PageSetup.LeftMargin = objWord2.InchesToPoints(0.5)
+								NVdiffReport.PageSetup.RightMargin = objWord2.InchesToPoints(0.5)
+								If ChangesRemovedCorrectly Then
+									NVdiffReport.SaveAs newSrcFldr & "\06" & currentBox & " NV " & loc & " Difference Report.doc", wdFormatDocument
+								End If
+								If (NVdiffOK = vbNo) Then
+									NVdiffReport.Close
+									objWord2.Application.Quit
+									Set objWord2 = Nothing
+									objTxtArea.Value = objTxtArea.Value & getTimeStamp() & "Process Terminated. Please try again. Difference report not showing correct changes." & VbCrLf																 
+									objTxtArea.scrollTop = objTxtArea.scrollHeight + objTxtArea.scrollTop
+									IntentionallyStopRTV(newSrcFldr)
+									Exit Sub
+								End If
+								RTVcheckDir = RTVdir & "\Check"
+								RTVfso.CreateFolder RTVcheckDir
+							Elseif equipType(i) = "VHLC" Then
+								RTVcheckDir = RTVdir
+								Delay(1)
+								RTVbackUpDir = RTVdirInService
+							End If
+							'create temporary log file so that if the changes arent removed correctly, the log entry can be removed
+							
+							ExtraFilesFldr = RTVdir & "\Garbage"
+							objFSO.CreateFolder ExtraFilesFldr
+							Set objFolder = objFSO.GetFolder(RTVdir)
+							For Each objFile In objFolder.Files
+								If ChangesRemovedCorrectly And (InStr(objFile.Name, programName(i)) = 1) And (UCase(Right(objFile.Name,3)) = "LOG") Then 
+									tempLogFile = ExtraFilesFldr & "\" & Left(objFile.Name,Len(objFile.Name)-4) & "_tempLog" & ".LOG"
+									'objFSO.CopyFile RTVdir & "\" & objFile.Name, tempLogFile
+									Call CopyMyFile(objFile.Name, RTVdir, tempLogFile)
+								End If
+							Next
+							
+							objTxtArea.Value = objTxtArea.Value & getTimeStamp() & "Created difference reports between the in-service and changed software, """ & programName(i) & """." & VbCrLf																 
+							objTxtArea.scrollTop = objTxtArea.scrollHeight + objTxtArea.scrollTop
+							Delay(1)
+							
+							'copy all files from Backup dir and place into Check dir with the exception of ".log" files which come from the RTVworking dir
+							If ChangesRemovedCorrectly Then
+								Set objFolder = objFSO.GetFolder(RTVbackUpDir)
+								For Each objFile In objFolder.Files
+									If (InStr(objFile.Name, programName(i)) = 1) And Not (UCase(Right(objFile.Name,3)) = "LOG") And Not (UCase(Right(objFile.Name,3)) = "RHF") Then 
+										'objFSO.CopyFile RTVdir & "\" & objFile.Name, RTVcheckDir & "\" & objFile.Name
+										Call CopyMyFile(objFile.Name, RTVdir, RTVcheckDir & "\" & objFile.Name)
+									Elseif (Right(objFile.Name, 3) = "log") Then  'if its VHLC this step is not needed. Hence, the lowercase 'log'
+										'objFSO.CopyFile RTVdir & "\" & objFile.Name, RTVcheckDir & "\" & objFile.Name	
+										Call CopyMyFile(objFile.Name, RTVdir, RTVcheckDir & "\" & objFile.Name)
+									End If
+								Next
+							Else
+								Set objFolder = objFSO.GetFolder(RTVcheckDir)
+								For Each objFile In objFolder.Files
+									If (InStr(objFile.Name, programName(i)) = 1) And (UCase(Right(objFile.Name,3)) = "LOG")  And Not (InStr(objFile.Name, "_tempLog") > 0) Then 
+										'tempName = objFile.Name
+										'objFile.Delete
+										objFSO.CopyFile tempLogFile, RTVcheckDir & "\" & objFile.Name
+									Elseif (Right(objFile.Name, 3) = "log") Then  'if its VHLC this step is not needed. Hence, the lowercase 'log'
+										'objFSO.CopyFile RTVdir & "\" & objFile.Name, RTVcheckDir & "\" & objFile.Name	
+										Call CopyMyFile(objFile.Name, RTVdir, RTVcheckDir & "\" & objFile.Name)
+									End If
+								Next
+							End If
+						
+							'compile the reversal of changes and make sure the log file validation crc matches in-service validation crc
+							Set WshShell = CreateObject("WScript.Shell")
+							If equipType(i) = "VHLC" Then
+								compilerAndFilePath = compilerPathVHLC & " " & userselections.manualCompile.checked & " " & RTVcheckDir & "\" & programName(i) & ".LOC"
+								WshShell.Run "MakeChangesAndCompileVHLC.exe " & compilerAndFilePath, 1, True
+							Elseif equipType(i) = "ElectrologIXS" Then
+								Delay(CompileWaitTime(0))
+								WshShell.Run "MakeChangesAndCompileELGX.exe " & userselections.logicStationVersion.value & " " & userselections.manualCompile.checked & " " & programNameSpaceToTilde(i) & " " & RTVcheckDir, 1, True
+								On Error Resume Next
+								NVdiffReport.Close
+								If Err.Number <> 0 Then
+								  Err.Clear
+								End If	
+								On Error Resume Next
+								objWord2.Application.Quit
+								If Err.Number <> 0 Then
+								  Err.Clear
+								End If
+								Set objWord2 = Nothing
+							End If
+							Set WshShell = Nothing
+							inSrvcCheckValCrc(i) = getLastLogValCrc(RTVcheckDir, programName(i), logSuffix(i))
+							If inSrvcCheckValCrc(i) <> inServiceValCrc(i) Then
+								If equipType(i) = "ElectrologIXS" Then
+									Set objFolder = objFSO.GetFolder(RTVdir)
+									For Each objFile In objFolder.Files
+										If (Right(objFile.Name, 3) = ".b1") Then
+											'objFSO.CopyFile RTVbackUpDir & "\" & objFile.Name, RTVcheckDir & "\" & objFile.Name
+											Call CopyMyFile(objFile.Name, RTVbackUpDir, RTVcheckDir & "\" & objFile.Name)
+										End If
+									Next	
+								Elseif equipType(i) = "VHLC" Then
+									Set objFolder = objFSO.GetFolder(RTVdir)
+									For Each objFile In objFolder.Files
+										If (Right(objFile.Name, 3) = "H14") Or (Right(objFile.Name, 3) = "H15") Then 
+											set filesys = CreateObject("Scripting.FileSystemObject")
+											If filesys.FileExists(RTVbackUpDir & "\" & objFile.Name) Then 
+												'objFSO.CopyFile RTVbackUpDir & "\" & objFile.Name, RTVcheckDir & "\" & objFile.Name
+												Call CopyMyFile(objFile.Name, RTVbackUpDir, RTVcheckDir & "\" & objFile.Name)
+											Else
+												objFSO.DeleteFile RTVdir & "\" & objFile.Name
+											End If
+											set filesys = Nothing
+										End If
+									Next
+								End If
+								ChangesRemovedCorrectly = False
+							Else
+								ChangesRemovedCorrectly = True
+								objFSO.DeleteFile tempLogFile
+								objFSO.DeleteFolder ExtraFilesFldr
+							End If						
+							On Error Resume Next
+							VdiffReport.Close
+							If Err.Number <> 0 Then
+							  Err.Clear
+							End If
+							On Error Resume Next
+							objWord1.Application.Quit
+							If Err.Number <> 0 Then
+							  Err.Clear
+							End If
+							Set objWord1 = Nothing	
+							Delay(1)
+							
+							If Not ChangesRemovedCorrectly Then
+								RemoveChangesAgain = MsgBox ("Changes were not correctly removed. Would you like to try again?", vbYesNo, "Try again?")
+								If (RemoveChangesAgain = vbNo) Then
+									objTxtArea.Value = objTxtArea.Value & getTimeStamp() & "Process Terminated. Please try again. Difference report not showing correct changes." & VbCrLf																 
+									objTxtArea.scrollTop = objTxtArea.scrollHeight + objTxtArea.scrollTop
+									IntentionallyStopRTV(newSrcFldr)
+									Exit Sub
+								End If
+							End If
+							
+						Loop While Not ChangesRemovedCorrectly
+						
+						objTxtArea.Value = objTxtArea.Value & getTimeStamp() & "Removed changes from the """ & programName(i) & """ software and recompiled and obtained the in-service validation CRC." & VbCrLf																 
+						objTxtArea.scrollTop = objTxtArea.scrollHeight + objTxtArea.scrollTop
+						Delay(1)
+						
+						'delete all Check dir files except for logs and copy the files from the RTV Working dir into Check dir except for the logs
+						If equipType(i) = "ElectrologIXS" Then
+							Delay(1)
+							''''''''''2016-09-28'''''''''THE SECTION BELOW WENT AWAY WHEN THE NEW ALSTOM RTVP PROCEDURE FORM WAS RELEASED WITHOUT THE STEP OF ADDING CHANGES BACK'''''''''''''''''''
+							'Set folder = RTVfso.GetFolder(RTVcheckDir)
+							'for each f in folder.Files
+							'	If Not (Right(f.Name, 3) = "log") Then
+							'		f.Delete True
+							'	End If
+							'Next
+							'Set folder = RTVfso.GetFolder(RTVdir)
+							'For Each f In folder.Files
+							'	If (InStr(f.Name, programName(i)) = 1) And Not (Right(f.Name,3) = "log") Then 
+							'		objFSO.CopyFile RTVdir & "\" & f.Name, RTVcheckDir & "\" & f.Name	
+							'	End If
+							'Next
+						Elseif equipType(i) = "VHLC" Then
+							Set WshShell = CreateObject("WScript.Shell")
+							savedString = objTxtArea.Value
+							objTxtArea.Value = "Run the VBU on the vital software in " & RTVdir & ", choosing the 'Restore' and 'New' options."
+							objTxtArea.scrollTop = objTxtArea.scrollHeight + objTxtArea.scrollTop
+							VBUAndFilePath = "r " & "n " & " " & userselections.manualCompile.checked & " " & programName(i) & " " & RTVdir
+							WshShell.Run "runVBU.exe " & VBUAndFilePath, 1, True
+							Set WshShell = Nothing
+							objTxtArea.Value = savedString & getTimeStamp() & "Ran the VBU to RESTORE the NEW to " & RTVdir & " for the """ & programName(i) & """ software from P:\_BACKUP.DIR\" & programName(i) & ".DIR\_NEWLOC.DIR." & VbCrLf
+							objTxtArea.scrollTop = objTxtArea.scrollHeight + objTxtArea.scrollTop
+							Delay(1)
+						End If
+						
+						
+						''''''''''2016-09-28'''''''''THE SECTION BELOW WAS ADDED WHEN THE NEW ALSTOM RTVP PROCEDURE FORM WAS RELEASED WITHOUT THE STEP OF ADDING CHANGES BACK'''''''''''''''''''
+						If equipType(i) = "VHLC" Then	
+							Do 	
+								Set WshShell = CreateObject("WScript.Shell")
+								compilerAndFilePath = compilerPathVHLC & " " & userselections.manualCompile.checked & " " & RTVdir & "\" & programName(i) & ".LOC"
+								WshShell.Run "compileVHLC.exe " & compilerAndFilePath, 1, True
+								Set WshShell = Nothing
+								newCheckValCrc(i) = getLastLogValCrc(RTVcheckDir, programName(i), logSuffix(i))
+								If newCheckValCrc(i) <> newValCrc(i) Then
+									MsgBox("Changes were not added back correctly or compile was not done. Compile the vital software in " & RTVcheckDir & ". Then, press 'ok'.")
+								End If
+							Loop While newCheckValCrc(i) <> newValCrc(i)
+							objTxtArea.Value = objTxtArea.Value & getTimeStamp() & "Added the changes back to the """ & programName(i) & """ software and recompiled and obtained the ""changes"" validation CRC." & VbCrLf																 
+							objTxtArea.scrollTop = objTxtArea.scrollHeight + objTxtArea.scrollTop
+							Delay(1)
+						End If
+
+						''''''''''2016-09-28'''''''''THE SECTION BELOW WENT AWAY WHEN THE NEW ALSTOM RTVP PROCEDURE FORM WAS RELEASED WITHOUT THE STEP OF ADDING CHANGES BACK'''''''''''''''''''
+						'compile and validate the re-inclusion of changes and make sure the log file validation crc matches in-service validation crc
+						'Do 	
+						'	Set WshShell = CreateObject("WScript.Shell")
+						'	If equipType(i) = "VHLC" Then
+						'		compilerAndFilePath = compilerPathVHLC & " " & userselections.manualCompile.checked & " " & RTVdir & "\" & programName(i) & ".LOC"
+						'		WshShell.Run "compileVHLC.exe " & compilerAndFilePath, 1, True
+						'	Elseif equipType(i) = "ElectrologIXS" Then
+						'		Delay(CompileWaitTime(0))
+						'		WshShell.Run "compileELGX.exe " & userselections.logicStationVersion.value & programNameSpaceToTilde(i) & " " & RTVcheckDir, 1, True
+						'	End If
+						'	Set WshShell = Nothing
+						'	newCheckValCrc(i) = getLastLogValCrc(RTVcheckDir, programName(i), logSuffix(i))
+						'	If newCheckValCrc(i) <> newValCrc(i) Then
+						'		MsgBox("Changes were not added back correctly or compile was not done. Compile the vital software in " & RTVcheckDir & ". Then, press 'ok'.")
+						'	End If
+						'Loop While newCheckValCrc(i) <> newValCrc(i)
+						'objTxtArea.Value = objTxtArea.Value & getTimeStamp() & "Added the changes back to the """ & programName(i) & """ software and recompiled and obtained the ""changes"" validation CRC." & VbCrLf																 
+						'objTxtArea.scrollTop = objTxtArea.scrollHeight + objTxtArea.scrollTop
+						'Delay(1)
+						
+						'working dir's last compile's validation
+						If (equipType(i) = "VHLC") Then
+							Do 
+								Set WshShell = CreateObject("WScript.Shell")								
+								Set fso = CreateObject("Scripting.FileSystemObject")
+								If fso.FileExists(RTVdir & "\" & programName(i) & ".H15") Then
+									validatorAndFilePath = validatorPathVHLC & " " & programName(i) & ".H14 " & programName(i) & ".H15 " & RTVdir
+									WshShell.Run "validateVHLC.exe " & validatorAndFilePath, 1, True			
+								Else
+									validatorAndFilePath = validatorPathVHLC & " " & programName(i) & ".H14 " & "N/A " & RTVdir
+									WshShell.Run "validateVHLC.exe " & validatorAndFilePath, 1, True	
+								End If
+								Set fso = Nothing
+								Delay(CompileWaitTime(1))							
+								Set WshShell = Nothing
+								finalNewValFileValidationCrc(i) = getValFileValidationCrc(RTVdir, programName(i), equipType(i))
+								If newCheckValCrc(i) <> finalNewValFileValidationCrc(i) Then
+									MsgBox("Val file does not match log file.")
+								End If
+							Loop While newCheckValCrc(i) <> finalNewValFileValidationCrc(i)
+							objTxtArea.Value = objTxtArea.Value & getTimeStamp() & "Validated the re-inclusion of changes to the """ & programName(i) & """ software and obtained the ""changes"" validation CRC." & VbCrLf																 
+							objTxtArea.scrollTop = objTxtArea.scrollHeight + objTxtArea.scrollTop
+							Delay(1)
+						End If
+					End If
+					
+					If equipType(i) = "ElectrologIXS" And VitalRTVPchanges(i) = 1 Then
+						If (houses = "") Then
+							newConsResults = readConsFile("new", a, programName(i), loc, workingDir, newSrcFldr, RTVPcreatorRootDir)
+						Else
+							newConsResults = readConsFile("new", a(i), programName(i), loc, workingDir, newSrcFldr, RTVPcreatorRootDir)
+						End If
+						NewConsSum(i) = newConsResults(0)
+						NewConsCrc(i) = newConsResults(1)
+						NewVitalSumFromCons(i) = newConsResults(2)
+						NewVitalCrcFromCons(i) = newConsResults(3)
+						NewNonVitalSum1(i) = newConsResults(4)
+						NewNonVitalCrc1(i) = newConsResults(5)
+					Elseif equipType(i) = "VHLC" Then	
+						If VitalRTVPchanges(i) = 1 Then
+							VitalCrcSumArray = getLastVitalSumAndCrc(RTVdir, programName(i))
+							NewConsCrc(i) = VitalCrcSumArray(0)
+							NewConsSum(i) = VitalCrcSumArray(1)
+							NewVitalCrcFromCons(i) = VitalCrcSumArray(2)
+							NewVitalSumFromCons(i) = VitalCrcSumArray(3)
+						End If
+						
+						If (NVChanges(i) = vbYes) Or NonVitalRTVPchanges(i) = 1 Then
+							Set objWord = CreateObject("Word.Application")
+							objWord.Visible = False	
+							NVlog = newSrcFldr & "\05" & currentBox & " " & loc
+							If NVChanges(i) = vbYes Then
+								Set objFolder = objFSO.GetFolder(workingDir)
+								'objFSO.CopyFile workingDir & "\" & NonVitalName(i) & ".LOG", RTVdir & "\" & NonVitalName(i) & ".LOG"
+								Call CopyMyFile(NonVitalName(i) & ".LOG", workingDir, RTVdir & "\" & NonVitalName(i) & ".LOG")
+								NonVitalCrcSumArray = getLastNonVitalSumAndCrc(RTVdir, programName(i))
+							Else
+								NonVitalCrcSumArray = getLastNonVitalSumAndCrcFromThisFile(workingDir & "\" & NonVitalName(i) & ".LOG")
+							End If
+							Set NVlogFile = objWord.Documents.Open(workingDir & "\" & NonVitalName(i) & ".LOG")
+							NVlogFile.PageSetup.TopMargin = objWord.InchesToPoints(0.5)
+							NVlogFile.PageSetup.BottomMargin = objWord.InchesToPoints(0.5)
+							NVlogFile.PageSetup.LeftMargin = objWord.InchesToPoints(0.5)
+							NVlogFile.PageSetup.RightMargin = objWord.InchesToPoints(0.5)
+							NVlogFile.SaveAs NVlog & " NV Log.doc", wdFormatDocument
+							objWord.Application.Quit
+							Set objWord = Nothing
+							NewNonVitalCrc1(i) = NonVitalCrcSumArray(0)
+							NewNonVitalSum1(i) = NonVitalCrcSumArray(1)
+							NewNonVitalCrc2(i) = NonVitalCrcSumArray(2)
+							NewNonVitalSum2(i) = NonVitalCrcSumArray(3)
+							NewNonVitalName(i) = NonVitalCrcSumArray(4)
+							
+							Set objWord = CreateObject("Word.Application")
+							objWord.Visible = False
+							If VitalRTVPchanges(i) = 0 Then
+								Set oldNVall = objWord.Documents.Open(Left(fileString, Len(fileString) - 4) & ".ALL")
+							Else
+								Set oldNVall = objWord.Documents.Open(RTVdirInService & "\" & NonVitalName(i) & ".ALL")
+							End If
+							If UCase(Right(NewNonVitalName(i),4)) = ".LOG" Then							
+								Set newNVall = objWord.Documents.Open(workingDir & "\" & Left(NewNonVitalName(i),Len(NewNonVitalName(i)) - 4) & ".ALL")
+							Else
+								Set newNVall = objWord.Documents.Open(workingDir & "\" & NewNonVitalName(i) & ".ALL")
+							End If
+							Set NVcompareReport = objword.CompareDocuments(oldNVall, newNVall)
+							oldNVall.Close
+							newNVall.Close
+							set oldNVall = nothing
+							set newNVall = nothing
+							NVcompareReport.PageSetup.TopMargin = objWord.InchesToPoints(0.5)
+							NVcompareReport.PageSetup.BottomMargin = objWord.InchesToPoints(0.5)
+							NVcompareReport.PageSetup.LeftMargin = objWord.InchesToPoints(0.5)
+							NVcompareReport.PageSetup.RightMargin = objWord.InchesToPoints(0.5)
+							NVcompareReport.SaveAs newSrcFldr & "\10" & currentBox & " NV " & loc & " Compare Report.doc", wdFormatDocument
+							NVcompareReport.Saved = 1 
+							NVcompareReport.Close
+							objWord.Application.Quit
+							Set objWord = Nothing	
+						Else
+							NewNonVitalCrc1(i) = "N/A "
+							NewNonVitalSum1(i) = "N/A "
+							NewNonVitalCrc2(i) = "N/A "
+							NewNonVitalSum2(i) = "N/A "
+						End If
+						
+						If VitalRTVPchanges(i) = 1 Then
+							Set WshShell = CreateObject("WScript.Shell")
+							savedString = objTxtArea.Value
+							objTxtArea.Value = "Run the VBU on the vital software in " & RTVdir & ", choosing the 'Backup' and 'New' options, overwriting the existing files."
+							objTxtArea.scrollTop = objTxtArea.scrollHeight + objTxtArea.scrollTop
+							VBUAndFilePath = "b " & "n " & " " & userselections.manualCompile.checked & " " & programName(i) & " " & RTVdir
+							WshShell.Run "runVBU.exe " & VBUAndFilePath, 1, True
+							Set WshShell = Nothing
+							objTxtArea.Value = savedString & getTimeStamp() & "Ran the VBU to BACKUP the NEW to P:\_BACKUP.DIR\" & programName(i) & ".DIR\_NEWLOC.DIR for the """ & programName(i) & """ software in " & RTVdir & "." & VbCrLf
+							objTxtArea.scrollTop = objTxtArea.scrollHeight + objTxtArea.scrollTop
+							Delay(1)
+						End If
+					End If
+					
+					If VitalRTVPchanges(i) = 1 Then
+						set filesys = CreateObject("Scripting.FileSystemObject")
+						filesys.CopyFolder RTVdir, workingDirP & "\"
+						set filesys = Nothing
+						
+						workingDir = workingDirP
+						Set objFSO = CreateObject("Scripting.FileSystemObject")
+						Set objFolder = objFSO.GetFolder(RTVdir)
+						'copy files from RTVP dir ---> working dir 
+						For Each objFile In objFolder.Files
+							If (InStr(objFile.Name, programName(i)) = 1) Then 
+								'RTVfso.CopyFile RTVdir & "\" & objFile.Name, workingDir & "\" & objFile.Name
+								Call CopyMyFile(objFile.Name, RTVdir, workingDir & "\" & objFile.Name)
+							End If
+						Next
+					End If
+					objTxtArea.Value = objTxtArea.Value & getTimeStamp() & "The RTV procedure is complete for the vital software in " & RTVdir & "." & VbCrLf
+					objTxtArea.scrollTop = objTxtArea.scrollHeight + objTxtArea.scrollTop
+				Loop While False
+			Next
+			
+			timeStamp = getTimeStamp()
+			ArchiveFolder workingDir, workingDirBackup & timeStamp & folderPath(folderDepth) & " afterRTVprocessFinished"
+			objTxtArea.Value = objTxtArea.Value & timeStamp & "Backup of working directory files after process finished: """ & workingDir & "\" & timeStamp & folderPath(folderDepth) & " afterRTVprocessFinished""" & VbCrLf & getTimeStamp() & "Collecting information..." & VbCrLf
+			objTxtArea.scrollTop = objTxtArea.scrollHeight + objTxtArea.scrollTop
+			Delay(1)
+			'read logs and collect info
+			For j = 0 To aUBound
+				Do
+					If VitalRTVPchanges(j) = 1 Then
+						If (houses = "") Then
+							currentHouse = a
+						Else
+							currentHouse = a(j)
+						End If
+						Set objWord = CreateObject("Word.Application")
+						objWord.Visible = False	
+						If equipType(j) = "ElectrologIXS" Then
+							log(j) = newSrcFldr & "\05" & currentHouse & " " & loc
+							eptCrc = "EPT CRC"
+							numOfCompiles = 3
+							LogSpacing = 7
+							logFileType = "v.log"
+							consOrLog = "cons"
+							If (houses = "") Then
+								Set nvlogFile = objWord.Documents.Open(workingDir & "\RTVP" & "\" & programName(j) & "n" & logFileType)
+							Else
+								Set nvlogFile = objWord.Documents.Open(workingDir & "\RTVP_" & currentHouse & "\" & programName(j) & "n" & logFileType)
+							End If
+							With nvlogFile
+								.PageSetup.TopMargin = objWord.InchesToPoints(0.5)
+								.PageSetup.BottomMargin = objWord.InchesToPoints(0.5)
+								.PageSetup.LeftMargin = objWord.InchesToPoints(0.5)
+								.PageSetup.RightMargin = objWord.InchesToPoints(0.5)
+								.SaveAs log(j) & " NV Log.doc", wdFormatDocument
+							End With	
+						Elseif equipType(j) = "VHLC" Then
+							log(j) = newSrcFldr & "\05" & currentHouse & " " & loc
+							eptCrc = "EPT-1 CRC"
+							numOfCompiles = 5
+							LogSpacing = 9
+							logFileType = ".LOG"
+							consOrLog = "LOG"
+						End If
+						If (houses = "") Then
+							Set logFile = objWord.Documents.Open(workingDir & "\RTVP" & "\" & programName(j) & logFileType)
+						Else
+							Set logFile = objWord.Documents.Open(workingDir & "\RTVP_" & currentHouse & "\" & programName(j) & logFileType)
+						End If
+						With logFile
+							.PageSetup.TopMargin = objWord.InchesToPoints(0.5)
+							.PageSetup.BottomMargin = objWord.InchesToPoints(0.5)
+							.PageSetup.LeftMargin = objWord.InchesToPoints(0.5)
+							.PageSetup.RightMargin = objWord.InchesToPoints(0.5)
+							.SaveAs log(j) & " V Log.txt"
+							.SaveAs log(j) & " V Log.doc", wdFormatDocument
+						End With
+						objWord.Application.Quit
+						Set objWord = Nothing	
+						
+						Set fso = CreateObject("Scripting.FileSystemObject")
+						Set f = fso.OpenTextFile(log(j) & " V Log.txt")
+						i = 0
+						Do Until f.AtEndOfStream
+							nextLine = f.ReadLine
+							strBeginNum = InStr(nextLine, eptCrc)
+							If strBeginNum <> 0 Then
+								sumAndCRC = Right(nextline, Len(nextLine) - ((strBeginNum) + LogSpacing))
+								crc(i,j) = Left(sumAndCRC,4)
+								sum(i,j) = Right(sumAndCRC,4)
+							End If
+							
+							strBeginNum = InStr(nextLine, "Validation CRC:")
+							If strBeginNum <> 0 Then
+								valCrc(i,j) = Left(Trim(Right(nextline, Len(nextLine) - ((strBeginNum) + 15))),8)
+								i = i + 1
+							End If
+						Loop
+						firstRtvCompile(j) = i - numOfCompiles
+						lastRtvCompile(j) = i - 1
+						OldVitalCrc(j) = crc(firstRtvCompile(j),j)
+						OldVitalSum(j) = sum(firstRtvCompile(j),j)
+						NewVitalCrc(j) = crc(lastRtvCompile(j),j)
+						If (houses = "") Then
+							If (equipType(j) = "ElectrologIXS") And Not (NewVitalCrc(j) = NewVitalCrcFromCons(j)) Then
+								MsgBox("ERROR: (Vital software) New cons file vital CRC does not match new log file CRC!")
+							End If
+							NewVitalSum(j) = sum(lastRtvCompile(j),j)
+							If (equipType(j) = "ElectrologIXS") And Not (NewVitalSum(j) = NewVitalSumFromCons(j)) Then
+								MsgBox("ERROR: (Vital software) New cons file vital checksum does not match new log file checksum!")
+							End If
+						Else
+							If (equipType(j) = "ElectrologIXS") And Not (NewVitalCrc(j) = NewVitalCrcFromCons(j)) Then
+								MsgBox("ERROR: (" & currentHouse & " vital software) New cons file vital CRC does not match new log file CRC!")
+							End If
+							NewVitalSum(j) = sum(lastRtvCompile(j),j)
+							If (equipType(j) = "ElectrologIXS") And Not (NewVitalSum(j) = NewVitalSumFromCons(j)) Then
+								MsgBox("ERROR: (" & currentHouse & " vital software) New cons file vital checksum does not match new log file checksum!")
+							End If
+						End If
+						f.close
+						'f.Delete
+						Set f = Nothing	
+					Else
+						Exit Do
+					End If
+				Loop While False
+			Next		
+			
+			'Creating Coverpage and Letter
+			Set objWord = CreateObject("Word.Application")
+			objWord.Visible = False	
+			If userselections.NonVitalRTVP.Checked Then
+				savePath = newSrcFldr & "\01 " & loc & " Cover Page and Letter NV.doc"
+			Else
+				savePath = newSrcFldr & "\01 " & loc & " Cover Page and Letter.doc"
+			End IF
+				
+			If SrcFldrAlreadyExisted = 1 Then
+				Set coverPage = objWord.Documents.Open(savePath)
+				Set objSelection = objWord.Selection
+				objSelection.Find.Forward = True
+				objSelection.Find.MatchWildcards = True
+				objSelection.Find.Text = "Revision History"
+				objSelection.Find.Execute
+				If objSelection.Find.Found Then
+					coverPage.Saved = 1
+					objWord.Application.Quit
+					Set objWord = Nothing
+				Else	
+					coverPage.Saved = 1
+					objWord.Application.Quit
+					Set objWord = Nothing
+					AddRevisionHistoryPage savePath, True
+				End If
+			Else
+				Set objWord = Nothing
+				AddRevisionHistoryPage savePath, False
+			End If
+			
+			Set objWord = CreateObject("Word.Application")
+			objWord.Visible = False	
+			Set coverPage = objWord.Documents.Open(savePath)
+			objTxtArea.Value = objTxtArea.Value & getTimeStamp() & "Creating Cover Page..." & VbCrLf
+			objTxtArea.scrollTop = objTxtArea.scrollHeight + objTxtArea.scrollTop
+			Delay(1)
+			
+			With coverPage
+				.CSXnum.Caption = "CSX#: " & csx
+				.LocName.Caption = loc
+				'.GeoLoc.Caption = city & ", " & st
+				.GeoLoc.Caption = st
+				.MilePost.Caption = "MP. " & mPost
+				.MmDdYyyy.Caption = strtDate
+				
+				If SrcFldrAlreadyExisted = 1 Then
+					On Error Resume Next
+					currentRevision = .RevisionNumber.Text
+					If Err.Number <> 0 Then
+						MsgBox("Cover page will need revision number added.")
+						Err.Clear
+					Else
+						Result = MsgBox("Would you like to increment the version number?", vbYesNo, "Increment Version Number?")
+						If Result = vbYes Then
+							.RevisionNumber.Text = CInt(currentRevision) + 1
+						End If
+					End If
+				End If
+				
+				.MonthDdYyyy.Caption = strtDateMonth
+				.FileName.Caption = "File: CSXVAL" & userselections.yearSelection.Value & "." & num
+				If (houses = "") Then
+					.LocNamHousesMilePost.Caption = loc & " / M.P. " & mPost
+					.LocNameHouses.Caption = loc & "."
+				Else
+					.LocNamHousesMilePost.Caption = loc & " / " & houseOrHouses & housesString & " / M.P. " & mPost
+					.LocNameHouses.Caption = loc & "; " & houseOrHouses & housesString & "."
+				End If
+				.DivSubdivSubAbrv.Caption = dvsn & " DIVISION / " & sdvsn & " SUBDIVISION (" & sdvsnAbrv & ")"
+				.XRLnum.Caption = "XRL#: " & xrl
+				If SrcFldrAlreadyExisted = 1 Then
+					On Error Resume Next
+					.CSXnum1.Caption = csx
+					If Err.Number <> 0 Then
+						MsgBox("Cover page will need CSX number added to the first page.")
+						Err.Clear
+					End If
+				Else
+					.CSXnum1.Caption = csx
+				End If
+				Set oFSO = CreateObject("Scripting.FileSystemObject")
+				If oFSO.FileExists(programmerSigFilePath) And SrcFldrAlreadyExisted = 0 Then
+					objWord.Selection.EndKey(6)
+					Set objInlineShape = objWord.Selection.InlineShapes.AddPicture(programmerSigFilePath)  'add signature
+					Set signatureShape = objInlineShape.ConvertToShape
+					With signatureShape
+						.Height = 35
+						.Width = 100
+						.WrapFormat.AllowOverlap = True
+						.Top = -115
+						.Left = 0
+						.WrapFormat.Type = 3
+						.ZOrder 5
+					End With
+				End If
+				.ProgrammerName1.Caption = programmer
+				'If UBound(programmerNameArray) = 1 Then
+					If programmer = "Darrin Eakins" or programmer = "John Miller" Then
+						.ProgrammerEmail = LCase(Left(programmerNameArray(0),2) & programmerNameArray(1)) & "@wabtec.com"
+					Else
+						.ProgrammerEmail = LCase(Left(programmerNameArray(0),1) & programmerNameArray(1)) & "@wabtec.com"
+					End If
+				'Elseif UBound(programmerNameArray) = 2 Then
+				'	.ProgrammerEmail = LCase(Left(programmerNameArray(0),1) & Left(programmerNameArray(1),1) & programmerNameArray(2)) & "@wabtec.com"
+				'End If
+				.ProgName = programNameString
+				.SaveAs savePath
+			End With
+			objWord.Application.Quit
+			Set objWord = Nothing	
+			
+			'Creating Scope Document
+			Set objWord = CreateObject("Word.Application")
+			objWord.Visible = False	
+			If SrcFldrAlreadyExisted = 1 Then
+				Set scopeDoc = objWord.Documents.Open(newSrcFldr & "\02 " & loc & " Scope Document.doc")
+			Else
+				Set scopeDoc = objWord.Documents.Open(RTVPcreatorRootDir & "RTVP_Creator\ElectrologIXS\02 Scope Document.docm")
+			End If
+			objTxtArea.Value = objTxtArea.Value & getTimeStamp() & "Creating Scope Document..." & VbCrLf
+			objTxtArea.scrollTop = objTxtArea.scrollHeight + objTxtArea.scrollTop
+			Delay(1)
+			
+			With scopeDoc
+				.CSXnum.Caption = csx
+				.LocName.Caption = loc
+				.MmDdYyyy.Caption = strtDate
+				.MmDdYyyy1.Caption = strtDate
+				
+				.SaveAs newSrcFldr & "\02 " & loc & " Scope Document.doc"
+			End With
+			objWord.Application.Quit
+			Set objWord = Nothing	
+			
+			'Creating Checkout Procedures Doc
+			Set objWord = CreateObject("Word.Application")
+			objWord.Visible = False	
+			If SrcFldrAlreadyExisted = 1 Then
+				Set checkoutProcedures = objWord.Documents.Open(newSrcFldr & "\03 " & loc & " Checkout Procedures.doc")
+			Else
+				If MicroLokII Then
+					Set checkoutProcedures = objWord.Documents.Open(RTVPcreatorRootDir & "RTVP_Creator\US&S\03 Checkout Procedures " & aUBound + 1 & ".docm")
+				Else
+					Set checkoutProcedures = objWord.Documents.Open(RTVPcreatorRootDir & "RTVP_Creator\ElectrologIXS\03 Checkout Procedures " & aUBound + 1 & ".docm")
+				End If
+			End If
+			
+			objTxtArea.Value = objTxtArea.Value & getTimeStamp() & "Creating Checkout Procedures..." & VbCrLf
+			objTxtArea.scrollTop = objTxtArea.scrollHeight + objTxtArea.scrollTop
+			Delay(1)
+			
+			With checkoutProcedures
+				'.LocNameCityStateMP = loc & ", " & city & ", " & st & " / M.P. " & mPost
+				.LocNameCityStateMP = loc & ", " & st & " / M.P. " & mPost
+				If (houses = "") Then
+					.House1Old.Caption = ""
+					.House1New.Caption = ""
+				Else
+					.House1Old.Caption = "LOC " & a(0) & ":"
+					.House1New.Caption = "LOC " & a(0) & ":"
+				End If
+				If equipType(0) = "ElectrologIXS" Then
+					If VitalRTVPchanges(0) = 1 Then
+						.House1OldCons.Caption = "Existing Consolidated                    CRC = " & OldConsCrc(0) & "  Checksum = " & OldConsSum(0) & " mb1"
+						.House1OldVital.Caption = "Existing Vital                           CRC = " & OldVitalCrc(0) & "  Checksum = " & OldVitalSum(0) & "  b1" 
+						.House1OldNonVital1.Caption = "Existing Non-Vital                       CRC = " & OldNonVitalCrc1(0) & "  Checksum = " & OldNonVitalSum1(0) & "  b1"
+						.House1OldNonVital2.Caption = ""
+						.House1NewCons.Caption = "New Consolidated                         CRC = " & NewConsCrc(0) & "  Checksum = " & NewConsSum(0) & " mb1"
+						.House1NewVital.Caption = "New Vital                                CRC = " & NewVitalCrc(0) & "  Checksum = " & NewVitalSum(0) & "  b1"  
+						.House1NewNonVital1.Caption = "New Non-Vital                            CRC = " & NewNonVitalCrc1(0) & "  Checksum = " & NewNonVitalSum1(0) & "  b1" 
+						.House1NewNonVital2.Caption = ""
+					End If
+				Elseif equipType(0) = "VHLC" Then
+					If NonVitalRTVPchanges(0) = 1 Then
+						.House1OldNonVital1.Caption = "Existing Non-Vital Site Specific (IC14)  CRC = " & OldNonVitalCrc1(0) & "  Checksum = " & OldNonVitalSum1(0) & " H30"
+						.House1OldNonVital2.Caption = "Existing Non-Vital Site Specific (IC15)  CRC = " & OldNonVitalCrc2(0) & "  Checksum = " & OldNonVitalSum2(0) & " H31"
+						.House1NewNonVital1.Caption = "New Non-Vital Site Specific      (IC14)  CRC = " & NewNonVitalCrc1(0) & "  Checksum = " & NewNonVitalSum1(0) & " H30"
+						.House1NewNonVital2.Caption = "New Non-Vital Site Specific      (IC15)  CRC = " & NewNonVitalCrc2(0) & "  Checksum = " & NewNonVitalSum2(0) & " H31"
+					End If
+					If VitalRTVPchanges(0) = 1 Then
+						.House1OldCons.Caption = "Existing Vital Site Specific     (IC14)  CRC = " & OldConsCrc(0) & "  Checksum = " & OldConsSum(0) & " H14"
+						.House1OldVital.Caption = "Existing Vital Site Specific     (IC15)  CRC = " & OldVitalCrcFromCons(0) & "  Checksum = " & OldVitalSumFromCons(0) & " H15"				
+						.House1NewCons.Caption = "New Vital Site Specific          (IC14)  CRC = " & NewConsCrc(0) & "  Checksum = " & NewConsSum(0) & " H14"
+						.House1NewVital.Caption = "New Vital Site Specific          (IC15)  CRC = " & NewVitalCrcFromCons(0) & "  Checksum = " & NewVitalSumFromCons(0) & " H15"
+					End If
+				Elseif equipType(0) = "MicroLokII" Then
+					'If NonVitalRTVPchanges(0) = 1 Then
+					'	.House1OldNonVital1.Caption = "Existing Non-Vital Site Specific         CRC = " & OldNonVitalCrc1(0) & "  Checksum = " & OldNonVitalSum1(0) 
+					'	.House1OldNonVital2.Caption = "" 
+					'	.House1NewNonVital1.Caption = "New Non-Vital Site Specific              CRC = " & NewNonVitalCrc1(0) & "  Checksum = " & NewNonVitalSum1(0) 
+					'	.House1NewNonVital2.Caption = "" 
+					'End If
+					'If VitalRTVPchanges(0) = 1 Then
+					'	.House1OldCons.Caption = "Existing Vital Site Specific     (IC14)  CRC = " & OldConsCrc(0) & "  Checksum = " & OldConsSum(0) & " H14"
+					'	.House1OldVital.Caption = ""				
+					'	.House1NewCons.Caption = "New Vital Site Specific          (IC14)  CRC = " & NewConsCrc(0) & "  Checksum = " & NewConsSum(0) & " H14"
+					'	.House1NewVital.Caption = ""
+					'End If
+					'If NonVitalRTVPchanges(0) = 1 Then
+						.House1OldNonVital1.Caption = "Existing Non-Vital Site Specific         CRC = XXXX  Checksum = XXXX" 
+						.House1OldNonVital2.Caption = "" 
+						.House1NewNonVital1.Caption = "New Non-Vital Site Specific              CRC = XXXX  Checksum = XXXX"
+						.House1NewNonVital2.Caption = "" 
+					'End If
+					'If VitalRTVPchanges(0) = 1 Then
+						.House1OldCons.Caption = "Existing Vital Site Specific             CRC = XXXX  Checksum = XXXX"
+						.House1OldVital.Caption = ""				
+						.House1NewCons.Caption = "New Vital Site Specific                  CRC = XXXX  Checksum = XXXX"
+						.House1NewVital.Caption = ""
+					'End If
+				End If
+				If aUBound > 0 Then
+					.House2Old.Caption = "LOC " & a(1) & ":"
+					.House2New.Caption = "LOC " & a(1) & ":"
+					If equipType(1) = "ElectrologIXS" Then
+						If VitalRTVPchanges(1) = 1 Then
+							.House2OldCons.Caption = "Existing Consolidated                    CRC = " & OldConsCrc(1) & "  Checksum = " & OldConsSum(1) & " mb1"
+							.House2OldVital.Caption = "Existing Vital                           CRC = " & OldVitalCrc(1) & "  Checksum = " & OldVitalSum(1) & "  b1"  
+							.House2OldNonVital1.Caption = "Existing Non-Vital                       CRC = " & OldNonVitalCrc1(1) & "  Checksum = " & OldNonVitalSum1(1) & "  b1" 
+							.House2OldNonVital2.Caption = ""
+							.House2NewCons.Caption = "New Consolidated                         CRC = " & NewConsCrc(1) & "  Checksum = " & NewConsSum(1) & " mb1" 
+							.House2NewVital.Caption = "New Vital                                CRC = " & NewVitalCrc(1) & "  Checksum = " & NewVitalSum(1) & "  b1"  
+							.House2NewNonVital1.Caption = "New Non-Vital                            CRC = " & NewNonVitalCrc1(1) & "  Checksum = " & NewNonVitalSum1(1) & "  b1" 
+							.House2NewNonVital2.Caption = ""
+						End If
+					Elseif equipType(1) = "VHLC" Then
+						If NonVitalRTVPchanges(1) = 1 Then
+							.House2OldNonVital1.Caption = "Existing Non-Vital Site Specific (IC14)  CRC = " & OldNonVitalCrc1(1) & "  Checksum = " & OldNonVitalSum1(1) & " H30"
+							.House2OldNonVital2.Caption = "Existing Non-Vital Site Specific (IC15)  CRC = " & OldNonVitalCrc2(1) & "  Checksum = " & OldNonVitalSum2(1) & " H31"
+							.House2NewNonVital1.Caption = "New Non-Vital Site Specific      (IC14)  CRC = " & NewNonVitalCrc1(1) & "  Checksum = " & NewNonVitalSum1(1) & " H30"
+							.House2NewNonVital2.Caption = "New Non-Vital Site Specific      (IC15)  CRC = " & NewNonVitalCrc2(1) & "  Checksum = " & NewNonVitalSum2(1) & " H31"
+						End If	
+						If VitalRTVPchanges(1) = 1 Then
+							.House2OldCons.Caption = "Existing Vital Site Specific     (IC14)  CRC = " & OldConsCrc(1) & "  Checksum = " & OldConsSum(1) & " H14"
+							.House2OldVital.Caption = "Existing Vital Site Specific     (IC15)  CRC = " & OldVitalCrcFromCons(1) & "  Checksum = " & OldVitalSumFromCons(1) & " H15"
+							.House2NewCons.Caption = "New Vital Site Specific          (IC14)  CRC = " & NewConsCrc(1) & "  Checksum = " & NewConsSum(1) & " H14"
+							.House2NewVital.Caption = "New Vital Site Specific          (IC15)  CRC = " & NewVitalCrcFromCons(1) & "  Checksum = " & NewVitalSumFromCons(1) & " H15"
+						End If
+					Elseif equipType(1) = "MicroLokII" Then
+						'If NonVitalRTVPchanges(1) = 1 Then
+							.House1OldNonVital1.Caption = "Existing Non-Vital Site Specific         CRC = XXXX  Checksum = XXXX"
+							.House1OldNonVital2.Caption = "" 
+							.House1NewNonVital1.Caption = "New Non-Vital Site Specific              CRC = XXXX  Checksum = XXXX" 
+							.House1NewNonVital2.Caption = "" 
+						'End If
+						'If VitalRTVPchanges(1) = 1 Then
+							.House1OldCons.Caption = "Existing Vital Site Specific             CRC = XXXX  Checksum = XXXX"
+							.House1OldVital.Caption = ""				
+							.House1NewCons.Caption = "New Vital Site Specific                  CRC = XXXX  Checksum = XXXX"
+							.House1NewVital.Caption = ""
+						'End If
+					End If
+					If aUBound > 1 Then
+						.House3Old.Caption = "LOC " & a(2) & ":"
+						.House3New.Caption = "LOC " & a(2) & ":"
+						If equipType(2) = "ElectrologIXS" Then
+							If VitalRTVPchanges(2) = 1 Then
+								.House3OldCons.Caption = "Existing Consolidated                    CRC = " & OldConsCrc(2) & "  Checksum = " & OldConsSum(2) & " mb1"
+								.House3OldVital.Caption = "Existing Vital                           CRC = " & OldVitalCrc(2) & "  Checksum = " & OldVitalSum(2) & "  b1"
+								.House3OldNonVital1.Caption = "Existing Non-Vital                       CRC = " & OldNonVitalCrc1(2) & "  Checksum = " & OldNonVitalSum1(2) & "  b1"
+								.House3OldNonVital2.Caption = ""
+								.House3NewCons.Caption = "New Consolidated                         CRC = " & NewConsCrc(2) & "  Checksum = " & NewConsSum(2) & " mb1"
+								.House3NewVital.Caption = "New Vital                                CRC = " & NewVitalCrc(2) & "  Checksum = " & NewVitalSum(2) & "  b1" 
+								.House3NewNonVital1.Caption = "New Non-Vital                            CRC = " & NewNonVitalCrc1(2) & "  Checksum = " & NewNonVitalSum1(2) & "  b1"
+								.House3NewNonVital2.Caption = ""
+							End If
+						Elseif equipType(2) = "VHLC" Then
+							If NonVitalRTVPchanges(2) = 1 Then
+								.House3OldNonVital1.Caption = "Existing Non-Vital Site Specific (IC14)  CRC = " & OldNonVitalCrc1(2) & "  Checksum = " & OldNonVitalSum1(2) & " H30"
+								.House3OldNonVital2.Caption = "Existing Non-Vital Site Specific (IC15)  CRC = " & OldNonVitalCrc2(2) & "  Checksum = " & OldNonVitalSum2(2) & " H31"
+								.House3NewNonVital1.Caption = "New Non-Vital Site Specific      (IC14)  CRC = " & NewNonVitalCrc1(2) & "  Checksum = " & NewNonVitalSum1(2) & " H30"
+								.House3NewNonVital2.Caption = "New Non-Vital Site Specific      (IC15)  CRC = " & NewNonVitalCrc2(2) & "  Checksum = " & NewNonVitalSum2(2) & " H31"
+							End If	
+							If VitalRTVPchanges(2) = 1 Then	
+								.House3OldCons.Caption = "Existing Vital Site Specific     (IC14)  CRC = " & OldConsCrc(2) & "  Checksum = " & OldConsSum(2) & " H14"
+								.House3OldVital.Caption = "Existing Vital Site Specific     (IC15)  CRC = " & OldVitalCrcFromCons(2) & "  Checksum = " & OldVitalSumFromCons(2) & " H15"
+								.House3NewCons.Caption = "New Vital Site Specific          (IC14)  CRC = " & NewConsCrc(2) & "  Checksum = " & NewConsSum(2) & " H14"
+								.House3NewVital.Caption = "New Vital Site Specific          (IC15)  CRC = " & NewVitalCrcFromCons(2) & "  Checksum = " & NewVitalSumFromCons(2) & " H15"
+							End If
+						Elseif equipType(2) = "MicroLokII" Then
+							'If NonVitalRTVPchanges(2) = 1 Then
+								.House1OldNonVital1.Caption = "Existing Non-Vital Site Specific         CRC = XXXX  Checksum = XXXX"
+								.House1OldNonVital2.Caption = "" 
+								.House1NewNonVital1.Caption = "New Non-Vital Site Specific              CRC = XXXX  Checksum = XXXX"
+								.House1NewNonVital2.Caption = "" 
+							'End If
+							'If VitalRTVPchanges(2) = 1 Then
+								.House1OldCons.Caption = "Existing Vital Site Specific             CRC = XXXX  Checksum = XXXX"
+								.House1OldVital.Caption = ""				
+								.House1NewCons.Caption = "New Vital Site Specific                  CRC = XXXX  Checksum = XXXX"
+								.House1NewVital.Caption = ""
+							'End If
+						End If
+						If aUBound > 2 Then				
+							.House4Old.Caption = "LOC " & a(3) & ":"
+							.House4New.Caption = "LOC " & a(3) & ":"
+							If equipType(3) = "ElectrologIXS" Then
+								If VitalRTVPchanges(3) = 1 Then
+									.House4OldCons.Caption = "Existing Consolidated                    CRC = " & OldConsCrc(3) & "  Checksum = " & OldConsSum(3) & " mb1"
+									.House4OldVital.Caption = "Existing Vital                           CRC = " & OldVitalCrc(3) & "  Checksum = " & OldVitalSum(3) & "  b1"
+									.House4OldNonVital1.Caption = "Existing Non-Vital                       CRC = " & OldNonVitalCrc1(3) & "  Checksum = " & OldNonVitalSum1(3) & "  b1"
+									.House4OldNonVital2.Caption = ""
+									.House4NewCons.Caption = "New Consolidated                         CRC = " & NewConsCrc(3) & "  Checksum = " & NewConsSum(3) & " mb1"
+									.House4NewVital.Caption = "New Vital                                CRC = " & NewVitalCrc(3) & "  Checksum = " & NewVitalSum(3) & "  b1" 
+									.House4NewNonVital1.Caption = "New Non-Vital                            CRC = " & NewNonVitalCrc1(3) & "  Checksum = " & NewNonVitalSum1(3) & "  b1"
+									.House4NewNonVital2.Caption = ""
+								End If
+							Elseif equipType(3) = "VHLC" Then
+								If NonVitalRTVPchanges(3) = 1 Then
+									.House4OldNonVital1.Caption = "Existing Non-Vital Site Specific (IC14)  CRC = " & OldNonVitalCrc1(3) & "  Checksum = " & OldNonVitalSum1(3) & " H30"
+									.House4OldNonVital2.Caption = "Existing Non-Vital Site Specific (IC15)  CRC = " & OldNonVitalCrc2(3) & "  Checksum = " & OldNonVitalSum2(3) & " H31"
+									.House4NewNonVital1.Caption = "New Non-Vital Site Specific      (IC14)  CRC = " & NewNonVitalCrc1(3) & "  Checksum = " & NewNonVitalSum1(3) & " H30"
+									.House4NewNonVital2.Caption = "New Non-Vital Site Specific      (IC15)  CRC = " & NewNonVitalCrc2(3) & "  Checksum = " & NewNonVitalSum2(3) & " H31"
+								End If
+								If VitalRTVPchanges(3) = 1 Then
+									.House4OldCons.Caption = "Existing Vital Site Specific     (IC14)  CRC = " & OldConsCrc(3) & "  Checksum = " & OldConsSum(3) & " H14"
+									.House4OldVital.Caption = "Existing Vital Site Specific     (IC15)  CRC = " & OldVitalCrcFromCons(3) & "  Checksum = " & OldVitalSumFromCons(3) & " H15"
+									.House4NewCons.Caption = "New Vital Site Specific          (IC14)  CRC = " & NewConsCrc(3) & "  Checksum = " & NewConsSum(3) & " H14"
+									.House4NewVital.Caption = "New Vital Site Specific          (IC15)  CRC = " & NewVitalCrcFromCons(3) & "  Checksum = " & NewVitalSumFromCons(3) & " H15"
+								End If
+							Elseif equipType(3) = "MicroLokII" Then
+								'If NonVitalRTVPchanges(3) = 1 Then
+									.House1OldNonVital1.Caption = "Existing Non-Vital Site Specific         CRC = XXXX  Checksum = XXXX"
+									.House1OldNonVital2.Caption = "" 
+									.House1NewNonVital1.Caption = "New Non-Vital Site Specific              CRC = XXXX  Checksum = XXXX"
+									.House1NewNonVital2.Caption = "" 
+								'End If
+								'If VitalRTVPchanges(3) = 1 Then
+									.House1OldCons.Caption = "Existing Vital Site Specific             CRC = XXXX  Checksum = XXXX"
+									.House1OldVital.Caption = ""				
+									.House1NewCons.Caption = "New Vital Site Specific                  CRC = XXXX  Checksum = XXXX"
+									.House1NewVital.Caption = ""
+								'End If
+							End If
+							If aUBound > 3 Then				
+								.House5Old.Caption = "LOC " & a(4) & ":"
+								.House5New.Caption = "LOC " & a(4) & ":"
+								If equipType(4) = "ElectrologIXS" Then
+									If VitalRTVPchanges(4) = 1 Then
+										.House5OldCons.Caption = "Existing Consolidated                    CRC = " & OldConsCrc(4) & "  Checksum = " & OldConsSum(4) & " mb1"
+										.House5OldVital.Caption = "Existing Vital                           CRC = " & OldVitalCrc(4) & "  Checksum = " & OldVitalSum(4) & "  b1"
+										.House5OldNonVital1.Caption = "Existing Non-Vital                       CRC = " & OldNonVitalCrc1(4) & "  Checksum = " & OldNonVitalSum1(4) & "  b1"
+										.House5OldNonVital2.Caption = ""
+										.House5NewCons.Caption = "New Consolidated                         CRC = " & NewConsCrc(4) & "  Checksum = " & NewConsSum(4) & " mb1"
+										.House5NewVital.Caption = "New Vital                                CRC = " & NewVitalCrc(4) & "  Checksum = " & NewVitalSum(4) & "  b1"
+										.House5NewNonVital1.Caption = "New Non-Vital                            CRC = " & NewNonVitalCrc1(4) & "  Checksum = " & NewNonVitalSum1(4) & "  b1"
+										.House5NewNonVital2.Caption = ""
+									End If
+								Elseif equipType(4) = "VHLC" Then
+									If NonVitalRTVPchanges(4) = 1 Then
+										.House5OldNonVital1.Caption = "Existing Non-Vital Site Specific (IC14)  CRC = " & OldNonVitalCrc1(4) & "  Checksum = " & OldNonVitalSum1(4) & " H30"
+										.House5OldNonVital2.Caption = "Existing Non-Vital Site Specific (IC15)  CRC = " & OldNonVitalCrc2(4) & "  Checksum = " & OldNonVitalSum2(4) & " H31"
+										.House5NewNonVital1.Caption = "New Non-Vital Site Specific      (IC14)  CRC = " & NewNonVitalCrc1(4) & "  Checksum = " & NewNonVitalSum1(4) & " H30"
+										.House5NewNonVital2.Caption = "New Non-Vital Site Specific      (IC15)  CRC = " & NewNonVitalCrc2(4) & "  Checksum = " & NewNonVitalSum2(4) & " H31"
+									End If
+									If VitalRTVPchanges(4) = 1 Then
+										.House5OldCons.Caption = "Existing Vital Site Specific     (IC14)  CRC = " & OldConsCrc(4) & "  Checksum = " & OldConsSum(4) & " H14"
+										.House5OldVital.Caption = "Existing Vital Site Specific     (IC15)  CRC = " & OldVitalCrcFromCons(4) & "  Checksum = " & OldVitalSumFromCons(4) & " H15"
+										.House5NewCons.Caption = "New Vital Site Specific          (IC14)  CRC = " & NewConsCrc(4) & "  Checksum = " & NewConsSum(4) & " H14"
+										.House5NewVital.Caption = "New Vital Site Specific          (IC15)  CRC = " & NewVitalCrcFromCons(4) & "  Checksum = " & NewVitalSumFromCons(4) & " H15"
+									End If
+								Elseif equipType(4) = "MicroLokII" Then
+									'If NonVitalRTVPchanges(4) = 1 Then
+										.House1OldNonVital1.Caption = "Existing Non-Vital Site Specific         CRC = XXXX  Checksum = XXXX"
+										.House1OldNonVital2.Caption = "" 
+										.House1NewNonVital1.Caption = "New Non-Vital Site Specific              CRC = XXXX  Checksum = XXXX"
+										.House1NewNonVital2.Caption = "" 
+									'End If
+									'If VitalRTVPchanges(4) = 1 Then
+										.House1OldCons.Caption = "Existing Vital Site Specific             CRC = XXXX  Checksum = XXXX"
+										.House1OldVital.Caption = ""				
+										.House1NewCons.Caption = "New Vital Site Specific                  CRC = XXXX  Checksum = XXXX"
+										.House1NewVital.Caption = ""
+									'End If
+								End If
+							End If
+						End If
+					End If
+				End If	
+				.SaveAs newSrcFldr & "\03 " & loc & " Checkout Procedures.doc"
+			End With
+			objWord.Application.Quit
+			Set objWord = Nothing	
+
+			For k = 0 to aUBound
+				If Not (houses = "") Then
+					objTxtArea.Value = objTxtArea.Value & "LOC " & a(k) & ":" & VbCrLf
+				End If
+				If equipType(k) = "ElectrologIXS" Then
+					If VitalRTVPchanges(k) = 1 Then
+						objTxtArea.Value = objTxtArea.Value & vbTab & "Existing Validation CRC   VAL CRC = " & valCrc(firstRtvCompile(k),k) & VbCrLf _
+															& vbTab & "Existing Consolidated             CRC = " & OldConsCrc(k) & "  Checksum = " & OldConsSum(k) & " mb1" & VbCrLf _															
+															& vbTab & "Existing Vital                           CRC = " & OldVitalCrc(k) & "  Checksum = " & OldVitalSum(k) & "  b1" & VbCrLf _
+															& vbTab & "Existing Non-Vital                   CRC = " & OldNonVitalCrc1(k) & "  Checksum = " & OldNonVitalSum1(k) & "  b1" & VbCrLf _
+															& vbTab & "New Validation CRC         VAL CRC = " & valCrc(lastRtvCompile(k),k) & VbCrLf _
+															& vbTab & "New Consolidated                   CRC = " & NewConsCrc(k) & "  Checksum = " & NewConsSum(k) & " mb1" & VbCrLf _
+															& vbTab & "New Vital                                 CRC = " & NewVitalCrc(k) & "  Checksum = " & NewVitalSum(k) & "  b1" & VbCrLf _
+															& vbTab & "New Non-Vital                         CRC = " & NewNonVitalCrc1(k) & "  Checksum = " & NewNonVitalSum1(k) & "  b1" & VbCrLf
+					End If
+				Elseif equipType(k) = "VHLC" Then
+					If NonVitalRTVPchanges(k) = 1 Then
+						objTxtArea.Value = objTxtArea.Value & vbTab & "Non-Vital" & VbCrLf _
+															& vbTab & "Existing Non-Vital Site Specific (IC14)  CRC = " & OldNonVitalCrc1(k) & "  Checksum = " & OldNonVitalSum1(k) & " H30" & VbCrLf _
+															& vbTab & "Existing Non-Vital Site Specific (IC15)  CRC = " & OldNonVitalCrc2(k) & "  Checksum = " & OldNonVitalSum2(k) & " H31" & VbCrLf _
+															& vbTab & "New Non-Vital Site Specific       (IC14)  CRC = " & NewNonVitalCrc1(k) & "  Checksum = " & NewNonVitalSum1(k) & " H30" & VbCrLf _
+															& vbTab & "New Non-Vital Site Specific       (IC15)  CRC = " & NewNonVitalCrc2(k) & "  Checksum = " & NewNonVitalSum2(k) & " H31" & VbCrLf
+					End If
+					If VitalRTVPchanges(k) = 1 Then
+						objTxtArea.Value = objTxtArea.Value & vbTab & "Vital" & VbCrLf _
+															& vbTab & "Existing Validation CRC                 VAL CRC = " & valCrc(firstRtvCompile(k),k) & VbCrLf _
+															& vbTab & "Existing Vital Site Specific         (IC14)  CRC = " & OldConsCrc(k) & "  Checksum = " & OldConsSum(k) & " H14" & VbCrLf _
+															& vbTab & "Existing Vital Site Specific         (IC15)  CRC = " & OldVitalCrcFromCons(k) & "  Checksum = " & OldVitalSumFromCons(k) & " H15" & VbCrLf _				
+															& vbTab & "New Validation CRC                      VAL CRC = " & valCrc(lastRtvCompile(k),k) & VbCrLf _
+															& vbTab & "New Vital Site Specific               (IC14)  CRC = " & NewConsCrc(k) & "  Checksum = " & NewConsSum(k) & " H14" & VbCrLf _
+															& vbTab & "New Vital Site Specific               (IC15)  CRC = " & NewVitalCrcFromCons(k) & "  Checksum = " & NewVitalSumFromCons(k) & " H15" & VbCrLf
+					End If
+				Elseif equipType(k) = "MicroLokII" Then
+					'If NonVitalRTVPchanges(k) = 1 Then
+						objTxtArea.Value = objTxtArea.Value & vbTab & "Non-Vital" & VbCrLf _
+															& vbTab & "Existing Non-Vital Site Specific         CRC = XXXX  Checksum = XXXX" & VbCrLf _
+															& vbTab & "New Non-Vital Site Specific               CRC = XXXX  Checksum = XXXX" & VbCrLf
+					'End If
+					'If VitalRTVPchanges(k) = 1 Then
+						objTxtArea.Value = objTxtArea.Value & vbTab & "Vital" & VbCrLf _
+															& vbTab & "Existing Vital Site Specific                 CRC = XXXX  Checksum = XXXX" & VbCrLf _
+															& vbTab & "New Vital Site Specific                       CRC = XXXX  Checksum = XXXX" & VbCrLf
+					'End If
+				End If
+			Next
+			objTxtArea.scrollTop = objTxtArea.scrollHeight + objTxtArea.scrollTop
+
+			'create RTV procedue documents
+			If Not userselections.NonVitalRTVP.Checked Then
+				objTxtArea.Value = objTxtArea.Value & getTimeStamp() & "Creating RTV Procedure Doc(s)..." & VbCrLf
+				objTxtArea.scrollTop = objTxtArea.scrollHeight + objTxtArea.scrollTop
+				Delay(1)
+				for j = 0 To aUBound
+					Do
+						If VitalRTVPchanges(j) = 0 Then
+							Exit Do
+						End If
+						Set objWord = CreateObject("Word.Application")
+						objWord.Visible = False	
+						Set procedureRecord = objWord.Documents.Open(RTVPcreatorRootDir & "RTVP_Creator\" & equipType(j) & "\04 RTV Procedure Record.docm")
+						With procedureRecord
+							If (houses = "") Then
+								currentHouse = a
+								.LocationHouseMilepost.Caption = loc & " M.P. " & mPost
+								.WorkingDirectory.Caption = workingDir
+								If equipType(j) = "ElectrologIXS" Then
+									.RtvBackupDir.Caption = workingDir & "\RTVP\Backup"
+									.RtvWorkingDir.Caption = workingDir & "\RTVP"
+								Elseif equipType(j) = "VHLC" Then	
+									.OldBackupDir.Caption = "P:\_BACKUP.DIR\" & programName(j) & ".DIR\_OLDLOC.DIR"
+									.NewBackupDir.Caption = "P:\_BACKUP.DIR\" & programName(j) & ".DIR\_NEWLOC.DIR"
+								End If
+							Else
+								currentHouse = a(j)
+								.LocationHouseMilepost.Caption = loc & " LOC. " & a(j) & " M.P. " & mPost
+								.WorkingDirectory.Caption = workingDir
+								If equipType(j) = "ElectrologIXS" Then
+									.RtvBackupDir.Caption = workingDir & "\RTVP_" & a(j) & "\Backup"
+									.RtvWorkingDir.Caption = workingDir & "\RTVP_" & a(j)
+								Elseif equipType(j) = "VHLC" Then	
+									.OldBackupDir.Caption = "P:\_BACKUP.DIR\" & programName(j) & ".DIR\_OLDLOC.DIR"
+									.NewBackupDir.Caption = "P:\_BACKUP.DIR\" & programName(j) & ".DIR\_NEWLOC.DIR"
+								End If
+							End If
+							
+							.Time.Caption = Hour(Now) & ":" & Right("0" & Minute(Now) , 2)
+							.OldValidationCRC.Caption = valCrc(firstRtvCompile(j),j)
+							.OldValidationCRC1.Caption = valCrc(firstRtvCompile(j),j)
+							.OldValidationCRC2.Caption = valCrc(firstRtvCompile(j),j)
+							.NewValidationCRC.Caption = valCrc(lastRtvCompile(j),j)
+							.NewValidationCRC1.Caption = valCrc(lastRtvCompile(j),j)
+							''''''''''2016-09-28'''''''''THE LINE BELOW WENT AWAY WHEN THE NEW ALSTOM RTVP PROCEDURE FORM WAS RELEASED WITHOUT THE STEP OF ADDING CHANGES BACK'''''''''''''''''''
+							'.NewValidationCRC2.Caption = valCrc(lastRtvCompile(j),j)  'This has been replaced with the if statement below 
+							If equipType(j) = "ElectrologIXS" Then	
+								.NewValidationCRC3.Caption = valCrc(firstRtvCompile(j),j)
+							Else
+								.NewValidationCRC2.Caption = valCrc(lastRtvCompile(j),j)
+								.NewValidationCRC3.Caption = valCrc(lastRtvCompile(j),j)
+							End If
+							
+							Set oFSO = CreateObject("Scripting.FileSystemObject")
+							If oFSO.FileExists(programmerSigFilePath) Then 'And SrcFldrAlreadyExisted = 0 Then
+								Set objInlineShape = objWord.Selection.InlineShapes.AddPicture(programmerSigFilePath)  'add signature
+								Set signatureShape = objInlineShape.ConvertToShape
+								With signatureShape
+									.Height = 35
+									.Width = 100
+									.WrapFormat.AllowOverlap = True
+									.Top = RTVprocedureSigHeight
+									.Left = 135
+									.WrapFormat.Type = 3
+									.ZOrder 5
+								End With
+							End If
+							.Date1.Caption = strtDate
+							.Date2.Caption = strtDate
+							.SaveAs newSrcFldr & "\04" & currentHouse & " " & loc & " RTV Procedure Record.doc"
+						End With
+						objWord.Application.Quit
+						Set objWord = Nothing	
+						Set obj = CreateObject("Scripting.FileSystemObject")
+						obj.DeleteFile(log(j) & " V Log.txt")
+					Loop While False
+				Next
+			End If
+			
+			objTxtArea.Value = objTxtArea.Value & getTimeStamp() & "Creating RTVP Checklist..." & VbCrLf
+			objTxtArea.scrollTop = objTxtArea.scrollHeight + objTxtArea.scrollTop
+			Delay(1)
+			'Creating Reduced Test Validation Program Checklist
+			Set objWord = CreateObject("Word.Application")
+			objWord.Visible = False	
+			Set fso = CreateObject("Scripting.FileSystemObject")
+			If SrcFldrAlreadyExisted = 1 And fso.FileExists(newSrcFldr & "\" & loc & " RTVP Checklist.doc") Then
+				Set RTVP_Checklist = objWord.Documents.Open(newSrcFldr & "\" & loc & " RTVP Checklist.doc")
+			Else
+				Set RTVP_Checklist = objWord.Documents.Open(RTVP_CreatorDir & "ElectrologIXS\CSX RTVP Checklist.doc")
+			End If		
+			With RTVP_Checklist
+				.locationName.Text = loc
+				.CustomerJobNum.Text = csx
+				.CustomerJobNum1.Text = csx
+				.XorailJobNum.Text = xrl
+				.DivAndSubdiv.Text = UCase(dvsn) & " DIVISION / " & UCase(sdvsn) & " SUBDIVISION (" & sdvsnAbrv & ")"
+				.ProgrammerName.Text = programmer
+				.SubmitDate.Text = strtDate
+				
+				.SaveAs newSrcFldr & "\" & loc & " RTVP Checklist.doc"
+			End With
+			objWord.Application.Quit
+			Set objWord = Nothing
+			
+			objTxtArea.Value = objTxtArea.Value & getTimeStamp() & "CSX RTVP Binder Cover..." & VbCrLf
+			objTxtArea.scrollTop = objTxtArea.scrollHeight + objTxtArea.scrollTop
+			Delay(1)
+			'Creating CSX RTVP Binder Cover
+			Set objWord = CreateObject("Word.Application")
+			objWord.Visible = False	
+			Set fso = CreateObject("Scripting.FileSystemObject")
+			If SrcFldrAlreadyExisted = 1 And fso.FileExists(newSrcFldr & "\" & loc & " RTVP Binder Cover.doc") Then
+				Set binderCover = objWord.Documents.Open(newSrcFldr & "\" & loc & " RTVP Binder Cover.doc")
+			Else
+				If userselections.NonVitalRTVP.Checked Then
+					Set binderCover = objWord.Documents.Open(RTVP_CreatorDir & "ElectrologIXS\CSX RTVP Binder Cover NV.doc")
+				Else
+					Set binderCover = objWord.Documents.Open(RTVP_CreatorDir & "ElectrologIXS\CSX RTVP Binder Cover.doc")
+				End If
+			End If
+			Set fso = Nothing
+			
+			With binderCover
+				.locationSt.Caption = loc & ", " & UCase(st)
+				.locationSt1.Caption = loc & ", " & UCase(st)
+				.locationSt2.Caption = loc & ", " & UCase(st)
+				.locationSt3.Caption = loc & ", " & UCase(st)
+				.locationSt4.Caption = loc & ", " & UCase(st)
+
+				.milePost.Caption = "MP. " & UCase(mPost)
+				.milePost1.Caption = "MP. " & UCase(mPost)
+				.milePost2.Caption = "MP. " & UCase(mPost)
+				.milePost3.Caption = "MP. " & UCase(mPost)
+				.milePost4.Caption = "MP. " & UCase(mPost)
+
+				.boxType1.Caption = "RTVP"
+				.boxType2.Caption = "REDUCED TEST VALIDATION"
+				.boxType3.Caption = "REDUCED TEST VALIDATION"
+				.boxType4.Caption = "REDUCED TEST VALIDATION"
+
+				.xrlNum.Caption = "XRL#: " & UCase(xrl)
+				.csxNum.Caption = "CSX#: " & UCase(csx)
+				.division.Caption = UCase(dvsn) & " DIVISION"
+				.subdivision.Caption = UCase(sdvsn) & " SUBDIVISION"
+
+				.SaveAs newSrcFldr & "\" & loc & " RTVP Binder Cover.doc"
+			End With
+			objWord.Application.Quit
+			Set objWord = Nothing
+			
+			objTxtArea.Value = objTxtArea.Value & getTimeStamp() & "The folder where the source files exist for the RTVP is: " & newSrcFldr & VbCrLf
+			objTxtArea.Value = objTxtArea.Value & getTimeStamp() & "RTVP Creation Complete." & VbCrLf
+			objTxtArea.scrollTop = objTxtArea.scrollHeight + objTxtArea.scrollTop
+			
+			Set objFS = CreateObject("Scripting.FileSystemObject")
+			Set objFolder = objFS.GetFolder(userselections.sourceDirPath.value)
+			For Each objFile In objFolder.Files
+				If (Right(objFile.Name, 3) = ".b1") Or (Right(objFile.Name, 3) = "B14") Or (Right(objFile.Name, 3) = "B15") Then
+					objFile.Delete
+				End If
+			Next
+			Set RTVPcreatorLogFile = objFS.CreateTextFile(RTVPcreatorLogsPath & getTimeStamp() & xrl & " " & loc & " RTVP Log.txt",True)  			
+			RTVPcreatorLogFile.Write(objTxtArea.Value)
+			RTVPcreatorLogFile.Close
+			Set objFS = Nothing
+			If VcardDisabled = 1 Then
+				setVideoCard("enable")
+				VcardDisabled = 0
+			End If
+		End Sub
+
+
+		Function GetOldVitalProgramName(oldFilesDir, equipment)
+			Set objFSO = CreateObject("Scripting.FileSystemObject")
+			Set objFolder = objFSO.GetFolder(oldFilesDir)
+			fileFound = 0
+			For Each objFile In objFolder.Files
+				If (InStr(objFile.Name, ".") > 0) Then
+					If (UCase(Right(objFile.Name, 3)) = "EQU") And (equipment = "VHLC") Then
+						fileFound = 1
+						GetOldVitalProgramName = Replace(UCase(objFile.Name),".EQU","")
+						Exit For
+					Elseif (LCase(Right(objFile.Name, 3)) = "ccf") And (equipment = "ElectrologIXS") Then
+						fileFound = 1
+						GetOldVitalProgramName = Replace(LCase(objFile.Name),".ccf","")
+						Exit For
+					End If
+				End If
+			Next
+			If fileFound = 0 Then
+				GetOldVitalProgramName = "File Not Found"
+			End If
+			Set objFSO = Nothing
+		End Function
+		
+		
+		Function readConsFile(oldOrNew, box, prog, location, workingPath, srcFldr, creatorRoot)
+			Set objWord = CreateObject("Word.Application")
+			objWord.Visible = False
+			Set consFile = objWord.Documents.Open(creatorRoot & "RTVP_Creator\ElectrologIXS\08 " & oldOrNew & " cons.doc")
+			Set objSelection = objWord.Selection
+			Set fso = CreateObject("Scripting.FileSystemObject")
+			If (box = "") Then
+				On Error Resume Next
+				Set f = fso.OpenTextFile(workingPath & "\RTVP\" & prog & "_cons.txt")
+				If Err.Number <> 0 Then
+					objWord.Application.Quit(0)
+					Set objWord = Nothing	
+					f.close
+					Set f = Nothing	
+					MsgBox(workingPath & "\RTVP\" & prog & "_cons.txt " & "does not exist. The RTVP creation Process will now stop. Please try again.")
+					Exit Function
+				End If
+			Else
+				On Error Resume Next
+				Set f = fso.OpenTextFile(workingPath & "\RTVP_" & box & "\" & prog & "_cons.txt")
+				If Err.Number <> 0 Then
+					objWord.Application.Quit(0)
+					Set objWord = Nothing	
+					f.close
+					Set f = Nothing	
+					MsgBox(workingPath & "\RTVP\" & prog & "_cons.txt " & "does not exist. The RTVP creation Process will now stop. Please try again.")
+					Exit Function
+				End If
+			End If
+			Do Until f.AtEndOfStream
+				nextLine = f.ReadLine
+				objSelection.Font.Name = "Courier New"
+				objSelection.Font.Size = "9"
+				objSelection.TypeText nextLine & vbCrLf
+				If InStr(nextLine,"Checksum:") <> 0 Then
+					g = Split(Mid(nextLine,10)," ")
+					For each h in g	
+						If Len(h) = 4 Then
+							result0 = h
+							Exit For
+						End If
+					Next
+				ElseIf InStr(nextLine,"EPT CRC:") <> 0 Then
+					g = Split(Mid(nextLine,9)," ")
+					For each h in g	
+						If Len(h) = 4 Then
+							result1 = h
+							Exit For
+						End If
+					Next
+				ElseIf InStr(nextLine, (prog & "v")) <> 0 Then
+					g = Split(Mid(nextLine, Len(prog) + 7)," ")
+					sumFlag = 0
+					For each h in g	
+						If Len(h) = 4 And sumFlag = 0 Then
+							result2 = h
+							sumFlag = 1
+						ElseIf Len(h) = 4 And sumFlag = 1 Then
+							result3 = h
+							Exit For
+						End If
+					Next
+				ElseIf InStr(nextLine, (prog & "nv")) <> 0 Then
+					g = Split(Mid(nextLine, Len(prog) + 8)," ")
+					sumFlag = 0
+					For each h in g	
+						If Len(h) = 4 And sumFlag = 0 Then
+							result4 = h
+							sumFlag = 1
+						ElseIf Len(h) = 4 And sumFlag = 1 Then
+							result5 = h
+							Exit For
+						End If
+					Next
+				End If
+			Loop
+			consFile.SaveAs srcFldr & "\08" & box & " " & oldOrNew & " " & location & " cons.doc"
+			objWord.Application.Quit
+			Set objWord = Nothing	
+			f.close
+			Set f = Nothing	
+			readConsFile = Array(result0, result1, result2, result3, result4, result5)
+		End Function
+
+
+		Function getNewSrcFldr(valPathPrefix, locName)
+			Dim fs, f, f1, fc, s, valDir, num
+			RtvpYear = userselections.yearSelection.Value
+			valDir = valPathPrefix & RtvpYear & "\CSX"
+			Set fs = CreateObject("Scripting.FileSystemObject")
+			If Not fs.FolderExists(valDir) Then
+				If Not fs.FolderExists(valPathPrefix & RtvpYear) Then
+					fs.CreateFolder valPathPrefix & RtvpYear
+				End If
+				fs.CreateFolder valDir
+				newValFldr = valDir & "\00_" & locName
+			Elseif userselections.validationRTVnum.value = "" Then
+				Set f = fs.GetFolder(valDir)
+				Set fc = f.SubFolders 
+				num = 0
+				For Each f1 in fc
+					numTemp = CInt(Left(f1.name,InStr(f1.name,"_")-1)) + 1
+					If numTemp > num Then
+						num = numTemp
+					End If
+				Next
+				If f.SubFolders.count = 0 Then
+					num = "00"
+				End If
+				If num > 0 And num < 10 Then
+					num = "0" & num
+				End If
+				newValFldr = valDir & "\" & num & "_" & locName
+			Else
+				num = userselections.validationRTVnum.value
+				newValFldr = valDir & "\" & num & "_" & locName
+			End If
+			If fs.FolderExists(newValFldr) Then
+				getNewSrcFldr = Array(num, newValFldr & "\" & "Source", 1)
+			Else
+				fs.CreateFolder newValFldr
+				fs.CreateFolder newValFldr & "\" & "Source"
+				getNewSrcFldr = Array(num, newValFldr & "\" & "Source", 0)
+			End If
+			Set fs = Nothing
+			userselections.validationRTVnum.value = num
+		End Function
+
+
+		Function getValFileValidationCrc(logPath, progName, equip)
+			Set fso = CreateObject("Scripting.FileSystemObject")
+			If equip = "ElectrologIXS" Then
+				Set f = fso.OpenTextFile(logPath & "\" & progName & "v.vdr")
+			Elseif equip = "VHLC" Then
+				Delay(1)
+				Set f = fso.OpenTextFile(logPath & "\" & progName & ".VAL")
+			End If
+			Do Until f.AtEndOfStream
+				nextLine = f.ReadLine
+				If InStr(nextLine, "Validation CRC:") <> 0 Then
+					v = Split(Mid(nextLine, InStr(nextLine, "Validation CRC:") + 15)," ")
+					For each x in v	
+						ValidationCrc = x
+						For i = Len(x) To 7
+							ValidationCrc = 0 & ValidationCrc
+						Next	
+					Next
+				End If
+			Loop
+			getValFileValidationCrc = ValidationCrc
+		End Function
+
+
+		Function getLastLogValCrc(logPath, progName, suffix)
+			Set fso = CreateObject("Scripting.FileSystemObject")
+			Set f = fso.OpenTextFile(logPath & "\" & progName & suffix)
+			Do Until f.AtEndOfStream
+				nextLine = f.ReadLine
+				If InStr(nextLine, "Validation CRC:") <> 0 Then
+					v = Split(Mid(nextLine, InStr(nextLine, "Validation CRC:") + 15)," ")
+					For each x in v
+						If x = "V2-CRC:" Then
+							Exit For
+						Elseif x = "" Or x = " " Or x = "  " Then
+						Else
+							If Len(x) >= 8 Then
+								lastLogValCrc = Left(x, 8)
+							End If
+						End If
+					Next
+				End If
+			Loop
+			getLastLogValCrc = lastLogValCrc
+		End Function
+
+
+		Function getLastVitalSumAndCrc(logPath, progName)
+			Set fso = CreateObject("Scripting.FileSystemObject")
+			Set folder = fso.GetFolder(logPath)
+				For Each f In folder.Files
+					If (InStr(f.Name, progName) = 1) And (UCase(Right(f.Name,3)) = "LOG") Then 
+						Set logFile = fso.OpenTextFile(logPath & "\" & f.Name)
+						Do Until logFile.AtEndOfStream
+							nextLine = logFile.ReadLine
+							If InStr(nextLine, "IC14") <> 0 And InStr(nextLine, "EPT-1") <> 0 Then
+								CrcSum1 = Mid(nextLine, InStr(nextLine, "EPT-1") + 10)
+								crc1 = Left(CrcSum1,4)
+								sum1 = Right(CrcSum1,4)
+								IC15flag = 0
+							Elseif InStr(nextLine, "IC15") <> 0 Then
+								CrcSum2 = Mid(nextLine, InStr(nextLine, "EPT-1") + 10)
+								crc2 = Left(CrcSum2,4)
+								sum2 = Right(CrcSum2,4)
+								IC15flag = 1
+							End If
+						Loop
+						If IC15flag = 0 Then
+							crc2 = "N/A "
+							sum2 = "N/A "
+						End If
+						Exit For
+					End If
+				Next
+			getLastVitalSumAndCrc = Array(crc1, sum1, crc2, sum2)
+		End Function
+
+
+		Function getLastNonVitalSumAndCrc(logPath, progName)
+			Set fso = CreateObject("Scripting.FileSystemObject")
+			Set folder = fso.GetFolder(logPath)
+				NonVitalFileName = ""
+				For Each f In folder.Files
+					If ((InStr(f.Name, Left(progName,3)) = 1) Or (InStr(f.Name, Left(LCase(progName),3)) = 1) Or (Len(progName) = 3 And InStr(f.Name, Left(progName,2)) = 1) Or (Len(progName) = 2 And InStr(f.Name, Left(progName,1)) = 1) Or (InStr(progName, Right(Left(f.Name,Len(f.Name)-4),Len(Left(f.Name,Len(f.Name)-4))-1)) = 1)) And (UCase(Right(f.Name,3)) = "LOG") And Not (InStr(f.Name, progName) = 1) Then 
+						Set logFile = fso.OpenTextFile(logPath & "\" & f.Name)
+						NonVitalFileName = f.Name
+						Do Until logFile.AtEndOfStream
+							nextLine = logFile.ReadLine
+							If InStr(nextLine, "IC14") <> 0 Then
+								CrcSum1 = Mid(nextLine, InStr(nextLine, "EPT-1") + 10)
+								crc1 = Left(CrcSum1,4)
+								sum1 = Right(CrcSum1,4)
+							Elseif InStr(nextLine, "IC15") <> 0 Then
+								CrcSum2 = Mid(nextLine, InStr(nextLine, "EPT-1") + 10)
+								crc2 = Left(CrcSum2,4)
+								sum2 = Right(CrcSum2,4)
+							End If
+						Loop
+						logFile.Close
+						f.Delete
+						Exit For
+					End If
+				Next
+				If NonVitalFileName = "" Then
+					NonVitalLogFile = SelectNonVitalLogFile("Select New Non-Vital '.LOG' File")
+					NonVitalFileName = NonVitalLogFile(0)
+					NonVitalLogFilePath = NonVitalLogFile(1)
+					If Not (NonVitalLogFileName = "NO_FILE") Then
+						Set logFile = fso.OpenTextFile(NonVitalLogFilePath)
+						Do Until logFile.AtEndOfStream
+							nextLine = logFile.ReadLine
+							If InStr(nextLine, "IC14") <> 0 Then
+								CrcSum1 = Mid(nextLine, InStr(nextLine, "EPT-1") + 10)
+								crc1 = Left(CrcSum1,4)
+								sum1 = Right(CrcSum1,4)
+							Elseif InStr(nextLine, "IC15") <> 0 Then
+								CrcSum2 = Mid(nextLine, InStr(nextLine, "EPT-1") + 10)
+								crc2 = Left(CrcSum2,4)
+								sum2 = Right(CrcSum2,4)
+							End If
+						Loop
+						logFile.Close
+					Else
+						MsgBox("No 'new' non-vital file was selected.")
+					End If
+				End If
+			getLastNonVitalSumAndCrc = Array(crc1, sum1, crc2, sum2, NonVitalFileName)
+		End Function
+		
+		
+		Function getLastNonVitalSumAndCrcFromThisFile(logPathAndName)
+			Set fso = CreateObject("Scripting.FileSystemObject")
+			Set logFile = fso.OpenTextFile(logPathAndName)
+			fileStringParts = Split(logPathAndName, "\")
+			NonVitalFileName = fileStringParts(UBound(fileStringParts))
+			Do Until logFile.AtEndOfStream
+				nextLine = logFile.ReadLine
+				If InStr(nextLine, "IC14") <> 0 Then
+					CrcSum1 = Mid(nextLine, InStr(nextLine, "EPT-1") + 10)
+					crc1 = Left(CrcSum1,4)
+					sum1 = Right(CrcSum1,4)
+				Elseif InStr(nextLine, "IC15") <> 0 Then
+					CrcSum2 = Mid(nextLine, InStr(nextLine, "EPT-1") + 10)
+					crc2 = Left(CrcSum2,4)
+					sum2 = Right(CrcSum2,4)
+				End If
+			Loop
+			logFile.Close
+			getLastNonVitalSumAndCrcFromThisFile = Array(crc1, sum1, crc2, sum2, NonVitalFileName)
+		End Function
+
+		
+		Function PickFile()
+			Dim objExec, strMSHTA, wshShell
+			PickFile = ""
+			strMSHTA = "mshta.exe ""about:" & "<" & "input type=file id=FILE>" _
+					 & "<" & "script>FILE.click();new ActiveXObject('Scripting.FileSystemObject')" _
+					 & ".GetStandardStream(1).WriteLine(FILE.value);close();resizeTo(0,0);" & "<" & "/script>"""
+			Set wshShell = CreateObject( "WScript.Shell" )
+			Set objExec = wshShell.Exec( strMSHTA )
+			fileStr = objExec.StdOut.ReadLine( )
+			If Not (fileStr = "") Then
+				PickFile = fileStr
+			Else
+				PickFile = "No file selected."
+			End If
+			Set objExec = Nothing
+			Set wshShell = Nothing
+		End Function 
+		
+
+		Sub FindFiles
+			j=0
+			Set filesys = CreateObject("Scripting.FileSystemObject") 
+			document.all.FileListing.innerHtml = ""
+			Set Folder = filesys.getfolder(userselections.workingDirPath.value)
+			For Each File in Folder.Files
+				filetype = filesys.GetExtensionName(File)
+				filename = filesys.GetFileName(File)	
+				filepath = File
+				If InStr(filename, "~") = 0 Then
+					If (filetype = "ccf") OR (filetype = "EQU") Then 
+						document.all.FileListing.innerHtml = document.all.FileListing.innerHtml & "<input name=chkBox type=checkbox id=Box"& j &"> <b>" & Left(filename,(Len(filename)-4)) & "</b><br>"
+						ReDim Preserve GoodFiles(j)
+						GoodFiles(j) = filename
+						j=j+1
+					End If	
+				End If
+			Next
+			If (j > 6) Then
+				winNewY = winY + (j*19)
+				window.resizeTo winX,winNewY
+			End If
+		End Sub
+
+		 
+		Function PickFolder(strStartDir)
+			Dim SA, F
+			Set SA = CreateObject("Shell.Application")
+			Set F = SA.BrowseForFolder(0, "Choose a folder", 0, strStartDir)
+			If (Not F Is Nothing) Then
+				PickFolder = F.Items.Item.path
+			Else
+				PickFolder = "No destination folder chosen."
+			End If
+			Set F = Nothing
+			Set SA = Nothing
+		End Function 
+
+
+		Sub ChooseSourceFolder
+			strStartDir = "P:\"
+			userselections.workingDirPath.value = PickFolder(strStartDir)
+			saveDir = userselections.workingDirPath.value
+		End Sub 
+
+		
+		Sub ArchiveFolder (sFolder, newFolder)
+			Set fso = CreateObject("Scripting.FileSystemObject")
+			Set Folder = fso.getfolder(sFolder)
+			For Each File in Folder.Files
+				If Not (Right(File.Name, 3) = "zip") Then
+					fileNames = fileNames & """" & sFolder & "\" & File.Name & """ "
+				End If
+			Next
+			RetVal = Zip(fileNames, newFolder & ".zip")
+			If not TypeName(RetVal) = "Integer" Then
+				msgbox("Install 7zip.")
+				IntentionallyStopRTV("")
+				ScriptStopper = 1
+				Exit Sub
+			End If
+			If RetVal <> 1 Then
+				MsgBox RetVal
+			End If
+		End Sub
+		
+
+		Sub Delay( seconds )
+			Dim wshShell, strCmd
+			Set wshShell = CreateObject( "Wscript.Shell" )
+			strCmd = "%COMSPEC% /C (PING -n " & ( seconds + 1 ) & " 127.0.0.1 >NUL 2>&1 || PING -n " & seconds & " ::1 >NUL 2>&1)"
+			wshShell.Run strCmd, 0, 1
+			Set wshShell = Nothing
+		End Sub
+		
+		
+		Function DoesFolderExist(dirPath, dirDepth)
+			Set fso = CreateObject("Scripting.FileSystemObject")
+			dirPathStr = "C:"
+			For i = 1 To dirDepth
+				dirPathStr = dirPathStr & "\" & dirPath(i)
+			Next
+			If Not fso.FolderExists(dirPathStr) Then
+				dummy = DoesFolderExist(dirPath, dirDepth - 1)
+				fso.CreateFolder dirPathStr
+			ElseIf dirDepth = 3 Then
+				Set folder = fso.GetFolder(dirPathStr)
+				For Each sf In folder.SubFolders
+					sf.Delete True
+				Next
+				For Each f In folder.Files
+				   f.Delete True
+				Next
+			End If	
+			Set fso = Nothing
+			DoesFolderExist = dirPathStr
+		End Function
+
+		
+		Sub Window_onLoad
+			window.resizeTo winX,winY
+			window.offscreenBuffering = True
+			Set objSysInfo = CreateObject("ADSystemInfo")
+			strUser = objSysInfo.UserName
+			Set objUser = GetObject("LDAP://" & strUser)
+			strFullName = Split(objUser.Get("displayName"),", ")
+			userselections.programmerUS.value = strFullName(1) & " " & strFullName(0)
+			Set WshShell = CreateObject("WScript.Shell")
+			If GetObject("winmgmts:root\cimv2:Win32_Processor='cpu0'").AddressWidth = "64" Then
+				WshShell.Run """C:\Program Files (x86)\GETS Global Signaling\Logic Station " & userselections.logicStationVersion.value & "\Validator\Validator.exe""", 1, False
+				SixtyFourBit = 1
+			Else
+				WshShell.Run """C:\Program Files\GETS Global Signaling\Logic Station " & userselections.logicStationVersion.value & "\Validator\Validator.exe""", 1, False
+			End If
+			While WshShell.AppActivate("Validator") = False
+				WaitMs(100)
+			Wend
+			WshShell.Run "taskkill /im Validator.exe"
+			Set WshShell = Nothing
+			setupYearDropDownBox(Year(date))
+			If (userselections.programmerUS.value = "Aaron Watkins") Or (userselections.programmerUS.value = "Chad Huey") Or (userselections.programmerUS.value = "Ekaterina Maslikov") Or (userselections.programmerUS.value = "Don Norman") Or (userselections.programmerUS.value = "Shawn D. Henry") Or (userselections.programmerUS.value = "John Miller") Then 
+				userselections.manualCompile.Checked = "False"
+			End If
+			
+			If userselections.programmerUS.value = "Don Norman" Then
+				winY=1000
+				winX=700
+				window.resizeTo winX,winY
+			End If
+			
+		End Sub
+		
+		Sub window_onUnload
+			If VcardDisabled = 1 Then
+				setVideoCard("enable")
+				VcardDisabled = 0
+			End If
+		End Sub
+		
+		
+		Sub IntentionallyStopRTV(SourceFolder)
+			If VcardDisabled = 1 Then
+				setVideoCard("enable")
+				VcardDisabled = 0
+			End If
+			If not SourceFolder = "" Then
+				Result = MsgBox("Would you like to delete the validation folder?", vbYesNo, "Delete Folder?")
+				If Result = vbYes Then
+					Dim fs
+					Set fs = CreateObject("Scripting.FileSystemObject")
+					ValFolder = fs.GetParentFolderName(SourceFolder)
+					If fs.FolderExists(ValFolder) Then
+						fs.DeleteFolder(ValFolder)
+					End If
+					Set fs = Nothing
+				End If
+			End If
+		End Sub
+		
+		
+		Sub setupYearDropDownBox(endYear)
+			startYear = 2014
+			For yearIndex = startYear To endYear
+                Set opt = document.createElement("OPTION")
+                opt.Value = yearIndex
+                opt.Text = yearIndex
+				If yearIndex = Year(date) Then
+					opt.Selected = True
+				Else
+					opt.Selected = False
+				End If
+				userselections.yearSelection.Add(opt)
+            Next 
+		End Sub
+		
+		
+		Sub WaitMs(mSecs)
+			Set WShell = CreateObject("WScript.Shell")
+			WShell.Run "SleepTime.exe " & mSecs, 1 ,True
+			Set WShell = Nothing
+		End Sub
+		
+		
+		Function getTimeStamp
+			If Len(Month(date)) = 1 Then
+				monthStr = "0" & Month(date)
+			Else
+				monthStr = Month(date)
+			End If
+			If Len(Day(date)) = 1 Then
+				dayStr = "0" & Day(date)
+			Else
+				dayStr = Day(date)
+			End If
+			militaryTime = Split(FormatDateTime(Now, vbShortTime),":")
+			militaryHour = militaryTime(0)
+			If Len(militaryTime(0)) = 1 Then
+				militaryHour = "0" & militaryTime(0)
+			Else
+				militaryHour = militaryTime(0)
+			End If
+			If Len(militaryTime(1)) = 1 Then
+				militaryMin = "0" & militaryTime(1)
+			Else
+				militaryMin = militaryTime(1)
+			End If
+			getTimeStamp = Year(date) & monthStr & dayStr & militaryHour & militaryMin & " "
+		End Function
+		
+		
+		Function Zip(sFile,sArchiveName)
+			Set oFSO = CreateObject("Scripting.FileSystemObject")
+			Set oShell = CreateObject("Wscript.Shell")
+
+			If oFSO.FileExists("C:\Program Files\7-Zip\7z.exe") Then
+				s7zLocation = "C:\Program Files\7-Zip\"
+			Else
+				Zip = "Error: Couldn't find 7z.exe"
+				Exit Function
+			End If
+
+			oShell.Run """" & s7zLocation & "7z.exe"" a -tzip -y """ & sArchiveName & """ " & sFile, 0, True   
+
+			If oFSO.FileExists(sArchiveName) Then
+				Zip = 1
+			Else
+				Zip = "Error: Archive Creation Failed."
+			End If
+		End Function
+
+		
+		Sub updateInfo
+			workingPathStruct = split(userselections.workingDirPath.value, "\")
+			workingDepth = UBound(workingPathStruct)
+			Set objTxtArea = window.document.getElementById("StatusMsg")
+			Set oFSO = CreateObject("Scripting.FileSystemObject")
+			
+			For Each folder in workingPathStruct
+				If UBound(split(folder, " ")) > 1 Then
+					MsgBox("Can't have more than 1 space in a signle piece of the path. Correct the path and try again.")
+					Exit Sub
+				End If
+			Next
+			
+			Set charList = CreateObject("System.Collections.ArrayList")
+			charList.Add("(")
+			charList.Add(")")
+			charList.Add("{")
+			charList.Add("}")
+			charList.Add("<")
+			charList.Add(">")
+			charList.Add("[")
+			charList.Add("]")
+
+			For Each char in charList
+				If InStr(userselections.workingDirPath.value, char) > 0 Then
+					MsgBox("Can't have parenthesis, brackets, or braces in working directory path. Remove them from the path and try again.")
+					Exit Sub
+				End If
+			Next
+			
+			If Not oFSO.FolderExists(userselections.workingDirPath.value) Then
+				objTxtArea.Value = objTxtArea.Value & getTimeStamp() & """" & userselections.workingDirPath.value & """ does not exist. Enter a valid path" & VbCrLf
+			ElseIf (workingDepth < 4) Then
+				objTxtArea.Value = objTxtArea.Value & getTimeStamp() & """" & userselections.workingDirPath.value & """ is not a valid working Dir. Enter a valid path" & VbCrLf
+			ElseIf (workingPathStruct(3) = "") Or (workingPathStruct(4) = "") Then
+				objTxtArea.Value = objTxtArea.Value & getTimeStamp() & """" & userselections.workingDirPath.value & """ is not a valid working Dir. Enter a valid path" & VbCrLf
+			Else
+				importInfo(lookForInfoFile(workingPathStruct))
+			End If
+			objTxtArea.scrollTop = objTxtArea.scrollHeight + objTxtArea.scrollTop
+		End Sub
+		
+		
+		Function lookForInfoFile(infoPathStruct)
+			Set fso = CreateObject("Scripting.FileSystemObject")
+			Set f = fso.GetFolder(userselections.workingDirPath.value)
+			Set subFldrs = f.SubFolders
+			For Each subF in subFldrs
+				If (UCase(Left(subF.name, 3)) = "XRL") Then
+					infoPathStr = fso.GetAbsolutePathName(subF)
+					Set folder = fso.GetFolder(infoPathStr)
+					For Each f in folder.Files
+						If (Right(f.Name, 19) = "info worksheet.xlsm") Then
+							lookForInfoFile = infoPathStr & "\" & f.Name
+							Set fso = Nothing
+							Exit Function
+						End If
+					Next
+				End If
+			Next	
+			
+			infoPathStruct = split(userselections.workingDirPath.value, "\")
+			infoPathStr = infoPathStruct(0)
+			For i = 1 To 3
+				infoPathStr = infoPathStr & "\" & infoPathStruct(i)
+			Next
+			Set folder = fso.GetFolder(infoPathStr)
+			For Each f in folder.Files
+				If (Right(f.Name, 19) = "info worksheet.xlsm") Then
+					lookForInfoFile = infoPathStr & "\" & f.Name
+					Set fso = Nothing
+					Exit Function
+				End If
+			Next
+			Set fso = Nothing
+			lookForInfoFile = ""
+		End Function
+		
+		
+		Sub importInfo(InfoFile)
+			If Not InfoFile = "" Then
+				Set objExcel = CreateObject("Excel.Application")
+				objExcel.Visible = False
+				Set excelInput = objExcel.Workbooks.Open(InfoFile)
+				with userselections
+					.mPostUS.value = UCase(excelInput.Sheets("Sheet1").Cells(3, 2))
+					.xrlUS.value = UCase(excelInput.Sheets("Sheet1").Cells(4, 2))
+					.rrNumUS.value = UCase(excelInput.Sheets("Sheet1").Cells(5, 2))
+					.dvsnUS.value = UCase(excelInput.Sheets("Sheet1").Cells(6, 2))
+					.sdvsnUS.value = UCase(excelInput.Sheets("Sheet1").Cells(7, 2))
+					.sdvsnAbrvUS.value = UCase(excelInput.Sheets("Sheet1").Cells(9, 2))
+					.stUS.value = UCase(excelInput.Sheets("Sheet1").Cells(15, 2))
+					'.cityUS.value = UCase(excelInput.Sheets("Sheet1").Cells(1, 4))
+					If excelInput.Sheets("Sheet1").Cells(2, 4) <> vbNullString Then
+						.logicStationVersion.value = excelInput.Sheets("Sheet1").Cells(2, 4) & " "
+					End If
+					If excelInput.Sheets("Sheet1").Cells(3, 4) <> vbNullString Then
+						result = MsgBox ("Is this RTV a revision to a previous RTV?", vbYesNo, "RTV revisions?")
+						If result = vbYes Then
+							.yearSelection.value = UCase(excelInput.Sheets("Sheet1").Cells(3, 4))
+							If excelInput.Sheets("Sheet1").Cells(4, 4) <> vbNullString Then
+								.validationRTVnum.value = UCase(excelInput.Sheets("Sheet1").Cells(4, 4))
+								If Len(.validationRTVnum.value) = 1 Then
+									.validationRTVnum.value = "0" & .validationRTVnum.value
+								End If
+							End If
+							If excelInput.Sheets("Sheet1").Cells(5, 4) = "1" Then
+								userselections.NonVitalRTVP.Checked = "True"
+							End If
+						End If
+					End If
+				End With
+				objExcel.Application.Quit
+				Set objExcel = Nothing
+				Set objTxtArea = window.document.getElementById("StatusMsg")
+				objTxtArea.Value = objTxtArea.Value & getTimeStamp() & "Location info imported successfully." & VbCrLf
+				objTxtArea.scrollTop = objTxtArea.scrollHeight + objTxtArea.scrollTop
+			End If
+		End Sub
+		
+		
+		Sub setVideoCard(actionStr)
+			strComputer = "." 
+			Set objWMIService = GetObject("winmgmts:\\" & strComputer & "\root\CIMV2") 
+			Set colItems = objWMIService.ExecQuery("SELECT * FROM Win32_VideoController",,48)
+			For Each objItem in colItems 
+				videoCard = split(objItem.PNPDeviceID,"&",2)
+			Next
+			Set WshShell = CreateObject("WScript.Shell")
+			dummy = WshShell.Run ("devcon.exe " & actionStr & " " & videoCard(0), 1, true)
+			Set WshShell = Nothing
+		End Sub
+		
+		
+		Sub CreateInfoWrksht(locationName, saveFolderNum)
+			Set objExcel = CreateObject("Excel.Application")
+			objExcel.Visible = False
+			Dim excelInput
+			infoFileExists = 0
+			Set fso = CreateObject("Scripting.FileSystemObject")
+			Set f = fso.GetFolder(userselections.workingDirPath.value)
+			Set subFldrs = f.SubFolders
+			For Each subF in subFldrs
+				If (Left(subF.name, 3) = "XRL") Then
+					infoPathStr = fso.GetAbsolutePathName(subF)
+					Set folder = fso.GetFolder(infoPathStr)
+					For Each f in folder.Files
+						If (Right(f.Name, 19) = "info worksheet.xlsm") Then
+							infoFileExists = 1
+							Set excelInput = objExcel.Workbooks.Open(infoPathStr & "\" & f.Name)
+							Exit For
+						End If
+					Next
+					Exit For
+				End If
+			Next
+			If infoFileExists = 0 Then
+				Set excelInput = objExcel.Workbooks.Open(docCreatorDir & "infoWorksheet.xlsm")	
+			End If
+			
+			With excelInput.Sheets("Sheet1")
+				If saveFolderNum = 0 Then
+					.Cells(1, 2) = userselections.programmerUS.value
+					.Cells(2, 2) = locationName
+					.Cells(3, 2) = userselections.mPostUS.value
+					.Cells(4, 2) = userselections.xrlUS.value
+					.Cells(5, 2) = userselections.rrNumUS.value
+					.Cells(6, 2) = userselections.dvsnUS.value
+					.Cells(7, 2) = userselections.sdvsnUS.value
+					.Cells(9, 2) = userselections.sdvsnAbrvUS.value
+					.Cells(15, 2) = userselections.stUS.value
+					.Cells(16, 2) = userselections.workingDirPath.value
+					'If userselections.Railroad(0).checked Then
+						.Cells(17, 2) = "CSX"
+					'Else
+					'	.Cells(17, 2) = "NS"
+					'End If						
+					.Cells(18, 2) = "1" '1 means it is true that its and RTV
+					'.Cells(1, 4) = userselections.cityUS.value
+					.Cells(2, 4) = RTrim(userselections.logicStationVersion.value)
+					.Cells(3, 4) = RTrim(userselections.yearSelection.value)
+				Else
+					.Cells(4, 4) = RTrim(userselections.validationRTVnum.value)
+					If userselections.NonVitalRTVP.Checked Then
+						.Cells(5, 4) = "1"
+					End If
+				End If			
+			End With
+			
+			excelInput.Application.DisplayAlerts = False
+			If (infoFileExists = 0) Then
+				excelInput.SaveAs infoPathStr & "\" & locationName & " info worksheet.xlsm"
+			Else
+				excelInput.Save
+			End If
+			If Not fso.FileExists(infoPathStr & "\" & "RunDocCreator.exe") Then
+				fso.CopyFile docCreatorDir & "RunDocCreator.exe", infoPathStr & "\" & "RunDocCreator.exe"
+			End If
+			objExcel.Application.Quit
+			Set fso = Nothing
+			Set objExcel = Nothing
+		End Sub
+		
+		
+		Function FindBackUpFolder(rootFolder, BackupType)
+			backupFolderFound = 0
+			Set objFSO = CreateObject("Scripting.FileSystemObject")
+			Set fldr = objFSO.GetFolder(rootFolder)
+			Set sFolders = fldr.SubFolders 	
+			For Each subFldr in sFolders
+				If (UCase(Left(subFldr.name, 3)) = "BAC" OR UCase(Left(subFldr.name, 3)) = "BAK") Then
+					BackupPathStr = objFSO.GetAbsolutePathName(subFldr)
+					If BackupType = 0 Then
+						FindBackUpFolder = objFSO.GetFolder(BackupPathStr) & "\"
+					Else
+						currentTime = getTimeStamp()
+						backupFolder = BackupPathStr & "\" & Left(currentTime, Len(currentTime) - 1)
+						objFSO.CreateFolder backupFolder
+						FindBackUpFolder = backupFolder & "\"
+					End If
+					backupFolderFound = 1
+					Exit For
+				End If
+			Next
+			If backupFolderFound = 0 Then
+				If BackupType = 1 Then
+					currentTime = getTimeStamp()
+					backupFolder = rootFolder & "\Backup"
+					objFSO.CreateFolder backupFolder
+					backupFolder = backupFolder & "\" & Left(currentTime, Len(currentTime) - 1)
+				Else
+					backupFolder = rootFolder & "\Backup"
+				End If
+				objFSO.CreateFolder backupFolder
+				FindBackUpFolder = backupFolder & "\"
+			End If
+			Set objFSO = Nothing
+		End Function
+		
+		
+		Function getInServiceFolder(currentDir, instructionString)
+			Const msoFileDialogOpen = 4
+			Set fso = CreateObject("Scripting.FileSystemObject")
+			Set objWord = CreateObject("Word.Application")
+			Set WshShell = CreateObject("WScript.Shell")
+			objWord.ChangeFileOpenDirectory(currentDir)
+
+			With objWord.FileDialog(msoFileDialogOpen)
+				.Title = instructionString
+				.AllowMultiSelect = False
+				.Filters.Clear
+				If .Show = -1 Then  'short form
+					For Each Folder in .SelectedItems  'short form
+						Set objFile = fso.GetFolder(Folder)
+						getInServiceFolder = objFile.Path
+					Next  
+				End If
+			End With
+			objWord.Quit
+			Set objWord = Nothing
+		End Function 	
+		
+		
+		Function SelectNonVitalFiles(RTVPdirectory, dialogBoxMessage, filters)
+			Dim NonVitalFiles(2)
+			Const msoFileDialogOpen = 1
+			Set fso = CreateObject("Scripting.FileSystemObject")
+			Set objWord = CreateObject("Word.Application")
+			Set WshShell = CreateObject("WScript.Shell")
+			objWord.ChangeFileOpenDirectory(userselections.workingDirPath.value)
+			With objWord.FileDialog(msoFileDialogOpen)
+				.Title = dialogBoxMessage 
+				.AllowMultiSelect = True
+				.Filters.Clear
+				.Filters.Add "All Files", filters
+				If .Show = -1 Then  'short form
+					i = 0
+					For Each File in .SelectedItems  'short form
+						Set objFile = fso.GetFile(File)
+						fso.CopyFile objFile.Path, RTVPdirectory & "\" & UCase(objFile.Name)
+						i = i + 1
+					Next    
+				End If
+			End With
+			objWord.Quit
+			Set objWord = Nothing
+			If i <> 2 Then
+				SelectNonVitalFiles = vbNo
+			Else
+				SelectNonVitalFiles = vbYes
+			End If
+		End Function 
+				
+		
+		Function SelectNonVitalLogFile(dialogBoxMessage)
+			Dim NonVitalFiles(2)
+			Const msoFileDialogOpen = 1
+			Set fso = CreateObject("Scripting.FileSystemObject")
+			Set objWord = CreateObject("Word.Application")
+			Set WshShell = CreateObject("WScript.Shell")
+			objWord.ChangeFileOpenDirectory(userselections.workingDirPath.value)
+			With objWord.FileDialog(msoFileDialogOpen)
+				.Title = dialogBoxMessage 
+				.AllowMultiSelect = False
+				.Filters.Clear
+				.Filters.Add "Log Files", "*.LOG"
+				If .Show = -1 Then  'short form
+					i = 0
+					For Each File in .SelectedItems  'short form
+						Set objFile = fso.GetFile(File)
+						nonVitalFileName = objFile.Name
+						NonVitalFilePath = objFile.Path
+						i = i + 1
+					Next    
+				End If
+			End With
+			objWord.Quit
+			Set objWord = Nothing
+			If i = 0 Then
+				SelectNonVitalLogFile = Array("NO_FILE","")
+			Else
+				SelectNonVitalLogFile = Array(nonVitalFileName, NonVitalFilePath)
+			End If
+		End Function 		
+	
+	
+		Sub BackupValidationFolder(validationBackupDir)
+			Set oFSO = CreateObject("Scripting.FileSystemObject")
+			sourceDirectory = oFSO.GetFolder(oFSO.GetParentFolderName(oFSO.GetParentFolderName(validationBackupDir)))
+			Set folder = oFSO.GetFolder(sourceDirectory)
+			For each f in folder.Files
+				'oFSO.CopyFile sourceDirectory & "\" & f.Name, validationBackupDir & "\" & f.Name
+				Call CopyMyFile(f.Name, sourceDirectory, validationBackupDir & "\" & f.Name)
+			Next
+			validationDirFolder = oFSO.GetParentFolderName(sourceDirectory)
+			Set folder = oFSO.GetFolder(validationDirFolder)
+			For each f in folder.Files
+				If Not f.Name = "Thumbs.db" Then
+					If Not (Left(f.Name,2) = "06" Or Left(f.Name,2) = "07" Or Left(f.Name,2) = "10" Or InStr(1,f.Name,"Difference Report",0) > 0 Or  InStr(1,f.Name,"ML2 RTV Procedure Form.pdf",0) > 0) Then
+						oFSO.MoveFile validationDirFolder & "\" & f.Name, validationBackupDir & "\" & f.Name
+					Else
+						'oFSO.CopyFile validationDirFolder & "\" & f.Name, validationBackupDir & "\" & f.Name
+						Call CopyMyFile(f.Name, validationDirFolder, validationBackupDir & "\" & f.Name)
+					End If
+				End If
+			Next
+		End Sub
+	
+		
+		Sub CopyMyFile(filename, from_folder, dest_folder_file)
+			Set oFSO = CreateObject("Scripting.FileSystemObject")
+			from_folder_file = from_folder & "\" & filename
+			If oFSO.FileExists(from_folder_file) Then
+				oFSO.CopyFile from_folder_file, dest_folder_file
+			Else
+				MsgBox(filename & " does not exist in \n" & from_folder)
+			End If
+			Set oFSO = Nothing
+		End Sub
+		
+		
+		Sub CreatePDFs
+			Set oFSO = CreateObject("Scripting.FileSystemObject")
+			If oFSO.FolderExists(userselections.sourceDirPath.value) Then
+				userselections.sourceDirPath.STYLE.backgroundcolor = "#FFFFFF"
+				PDFsourceFolder = userselections.sourceDirPath.value
+				PDFdestinationFolder = oFSO.GetParentFolderName(PDFsourceFolder)
+				ValidationDistributionFolder = PDFdestinationFolder & "\Distribution"
+				If Not oFSO.FolderExists(ValidationDistributionFolder) Then
+					oFSO.CreateFolder ValidationDistributionFolder
+				End If
+				Set Destinationfolder = oFSO.GetFolder(PDFdestinationFolder)
+				Set folder = oFSO.GetFolder(PDFsourceFolder)
+				Set fileSystemObject = CreateObject("Scripting.FileSystemObject")
+				Set wordApplication = CreateObject("Word.Application")
+				Set app = CreateObject("AcroExch.App")  	
+				Set insertDoc = CreateObject("AcroExch.PDDoc") 
+				Set baseDoc = CreateObject("AcroExch.PDDoc")  
+				firstPass = 1
+				For each f in folder.Files
+					If  Not (f.Name = "Thumbs.db") And (InStr(f.Name, "Binder Cover.doc") = 0) Then
+						fileBaseName = oFSO.GetBaseName(f.Name)
+						pdfOutputFile = PDFdestinationFolder & "\" & fileBaseName & ".pdf"
+						If firstPass = 1 Then
+							firstPass = 0
+							Set objTxtArea = window.document.getElementById("StatusMsg")
+							objTxtArea.Value = "RTVP PDF creation process has started." & VbCrLf & "."
+							objTxtArea.scrollTop = objTxtArea.scrollHeight + objTxtArea.scrollTop
+							WaitMs(100)
+							fileNameArray = Split(Destinationfolder.Name, "_", 2)
+							destPath = ValidationDistributionFolder & "\" & getTimeStamp() & fileNameArray(1) & " RTVP " & userselections.RRnumUS.Value & ".pdf"
+							wordApplication.Visible = False
+							Set wordDocument = wordApplication.Documents.Open(PDFsourceFolder & "\" & f.Name)	
+							wordDocument.SaveAs2 pdfOutputFile, 17
+							wordDocument.SaveAs2 destPath, 17
+							wordDocument.Close WdDoNotSaveChanges
+						Else
+							wordApplication.Visible = False
+							Set wordDocument = wordApplication.Documents.Open(PDFsourceFolder & "\" & f.Name)	
+							wordDocument.SaveAs2 pdfOutputFile, 17
+							wordDocument.Close WdDoNotSaveChanges
+						End If
+					End If
+					Set objTxtArea = window.document.getElementById("StatusMsg")
+					objTxtArea.Value = objTxtArea.Value & "."
+					objTxtArea.scrollTop = objTxtArea.scrollHeight + objTxtArea.scrollTop
+					WaitMs(100)
+				Next
+				wordApplication.Quit WdDoNotSaveChanges
+				Set wordApplication = Nothing
+				
+				Set folder = oFSO.GetFolder(PDFdestinationFolder)
+				For each f in folder.Files
+					If Not (f.Name = "Thumbs.db") And Not (Left(f.Name, 2) = "01") And (InStr(f.Name, "Checklist.pdf") = 0) Then
+						baseDoc.Open destPath
+						insertDoc.Open f
+						baseDoc.InsertPages baseDoc.GetNumPages()-1, insertDoc, 0, insertDoc.GetNumPages(), 1	
+						baseDoc.Save &H1, destPath
+						insertDoc.Close
+					End If								
+				Next
+				Set fileSystemObject = Nothing
+				Set objTxtArea = window.document.getElementById("StatusMsg")
+				objTxtArea.Value = "The PDF of the RTVP is complete and is located in " & destPath & "." & VbCrLf
+				objTxtArea.scrollTop = objTxtArea.scrollHeight + objTxtArea.scrollTop
+			Else
+				userselections.sourceDirPath.STYLE.backgroundcolor = "#FF7777"
+				Set objTxtArea = window.document.getElementById("StatusMsg")
+				objTxtArea.Value = "This folder does not exist. Please enter a different path and try again." & VbCrLf
+				objTxtArea.scrollTop = objTxtArea.scrollHeight + objTxtArea.scrollTop
+				Exit Sub
+			End If	
+		End Sub
+
+		
+		Sub AddRevisionHistoryPage(destinationFile, fileAlreadyExists)
+			Set objWord = CreateObject("Word.Application")
+			Const wdPageBreak = 7 
+			Const wdGoToLine = 3
+			Const wdGoToAbsolute = 1
+			Const wdAlignParagraphCenter = 1
+			Const wdAlignParagraphLeft = 0	
+			If fileAlreadyExists Then
+				Set objDoc = objWord.Documents.Open(destinationFile)
+			Else
+				If userselections.NonVitalRTVP.Checked Then
+					Set objDoc = objWord.Documents.Open(RTVP_CreatorDir & "ElectrologIXS\01 Cover Page and Letter NV.docm")
+				Else
+					Set objDoc = objWord.Documents.Open(RTVP_CreatorDir & "ElectrologIXS\01 Cover Page and Letter.docm")
+				End If
+			End If
+			Set objSelection = objWord.Selection
+			objSelection.GoTo wdGoToLine, wdGoToAbsolute, 29
+			objSelection.Font.Name = "Arial"
+			objSelection.Font.Size = "18"
+			objSelection.Font.Color = RGB(0,0,0)
+			objSelection.Font.Bold = True
+			objSelection.Font.Underline = True			
+			objSelection.ParagraphFormat.Alignment = wdAlignParagraphCenter
+			objSelection.TypeText "Revision History"
+			objSelection.TypeParagraph()
+			objSelection.Font.Size = "12"
+			objSelection.Font.Bold = False
+			objSelection.Font.Underline = False			
+			objSelection.ParagraphFormat.Alignment = wdAlignParagraphLeft
+			objSelection.TypeText vbCrLf
+			objSelection.TypeParagraph()
+			objSelection.InsertBreak(wdPageBreak)
+			If fileAlreadyExists Then
+				objDoc.Save
+			Else
+				objDoc.SaveAs destinationFile
+			End If
+			objWord.Application.Quit
+			Set objWord = Nothing
+		End Sub
+		
+		
+		Sub checkRR_NUMandGetPath
+			If (userselections.rrNumUS.value = "RailRoad #") Then
+				userselections.createPDFbutton.disabled = True
+				Set objTxtArea = window.document.getElementById("StatusMsg")
+				objTxtArea.Value = "Enter the customer's project number." & VbCrLf
+				objTxtArea.scrollTop = objTxtArea.scrollHeight + objTxtArea.scrollTop
+				userselections.rrNumUS.STYLE.backgroundcolor = "#FF7777"
+			Else
+				userselections.createPDFbutton.disabled = False
+				userselections.rrNumUS.STYLE.backgroundcolor = "#FFFFFF"
+			End If
+		End Sub
+		
+		
+		' Sub workingDirectoryPath_KeyPress  'used for the when workingDirPath used ENTER for taking a folder path
+			' If window.event.Keycode = 13 Then
+				' updateInfo
+			' End If
+		' End Sub
+		
+		
+	</SCRIPT>
+
+	<img id="train" src="train.bmp" alt="train" width="500" height="200">
+	<canvas id="train" width="500" height="200" style="border:1px solid #d3d3d3;"></canvas>
+	<p>
+		<form name="userselections">
+		<table style="width:500px;height:100px;" cellpadding="0" cellspacing="0">
+			<tr>
+				<td colspan="2" style="background-color:#6181FF;text-align:center;">
+					<h1 style="margin:0;padding:0;">RTVP Creator</h1>
+					<input type ="text" name ="workingDirPath" value="Working Dir (where the changes to be included in the RTV were made)." size="74" title="Paste the working directory here." onchange="updateInfo"/><br><br>
+					<!--<input type ="text" name ="workingDirPath" value="Working Dir (where the changes to be included in the RTV were made)." size="74" title="Source Files" onkeypress="workingDirectoryPath_KeyPress" /><br><br>-->
+					<input type ="button" value ="Working Dir..." ID="button1" onClick="ChooseSourceFolder" />&nbsp;&nbsp;&nbsp;&nbsp;
+					<input type ="button" onClick="FindFiles" value ="Pick Houses..." ID="PickHouses" title="Choose which programs in the working directory will have an RTV done on them"/>&nbsp;&nbsp;&nbsp;&nbsp;
+					<INPUT TYPE="button" onClick="Main" VALUE="Create RTVP" ID="button1" title="Start the RTV creation process"/>&nbsp;&nbsp;&nbsp;&nbsp;
+					<select name="logicStationVersion" title="Compiler version to be used for this process">
+						<option value="1.10 ">4.7</option>
+						<option value="1.11 ">4.8</option>
+						<option value="1.12 ">4.9</option>
+						<option value="2.1 ">5.1</option>
+						<option value="2.5 " selected>5.5</option>
+						<option value="2.8 ">5.8</option>
+					</select><br><br>
+				</td>
+			</tr>
+			<tr>
+				<td style="background-color:#FEFD63;width:355px;vertical-align:top;">
+					<b>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Location Data</b><br>
+					&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Non Vital RTVP<input type="checkbox" name="NonVitalRTVP" value="1"><br>&nbsp;&nbsp;
+					<select id="yearSelection" title="Select the year of the validation folder"></select>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+					Manually Compile<input type="checkbox" name="manualCompile" value="1" title="Check to manually use the compiler in RTV process" checked><br>&nbsp;&nbsp;
+					<input type ="text" name ="programmerUS" value="Programmer Name" size="20" title="Programmer Name" />&nbsp;&nbsp; 
+					Fldr # <input type ="text" name ="validationRTVnum" value="" size="1" title="Validation File Number" /><br>&nbsp;&nbsp;
+					<input type ="text" name ="mPostUS" value="CTT-19.50" size="10" title="Mile Post" />
+					<input type ="text" name ="stUS" value="OH" size="1" title="Location's State" />
+					<input type ="text" name ="sdvsnAbrvUS" value="TT" size="1" title="Subdivision Abbreviation" />
+					<input type ="text" name ="housesUS" value="" size="7" title="Houses Included in RTVP (fill this out when doing an RTV for the first time)" /><br>&nbsp;&nbsp;
+					<input type ="text" name ="rrNumUS" value="RailRoad #" size="11" title="CSX Job Number" onchange="checkRR_NUMandGetPath"/>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+					<input type ="text" name ="xrlUS" value="CWM13-34532" size="15" title="XRL Job Number" /><br>&nbsp;&nbsp;
+					<!--<input type ="text" name ="cityUS" value="ROSSFORD" size="16" title="Location's City" />&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;-->
+					<input type ="text" name ="dvsnUS" value="CHICAGO" size="10" title="Division" />
+					<input type ="text" name ="sdvsnUS" value="TOLEDO TERMINAL" size="20" title="Subdivision" /><br>&nbsp;&nbsp;
+					<br>
+				</td>
+				<td style="background-color:#D5D4D4;height:185px;width:400px;vertical-align:top;">
+					<b>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Possible Program Names</b><br><br>
+					<SPAN ID=FileListing style="background-color: #eeeeee;" /></span>
+				</td>
+			</tr>
+		</table>
+		<input type ="text" name ="sourceDirPath" value="Source Dir (where the RTVP docs are)." size="64" title="Validation Source directory" onchange="checkRR_NUMandGetPath"/>&nbsp;&nbsp;&nbsp;&nbsp;
+		<INPUT TYPE="button" name="createPDFbutton" onClick="CreatePDFs" VALUE="To PDF" ID="convertToPDF" disabled/><br>			
+		<textarea rows="10" cols="60" id="StatusMsg"></textarea>
+	</p>
+	<table style="width:500px;" cellpadding="0" cellspacing="0">
+		<tr>
+			<td colspan="2" style="background-color:#6181FF;text-align:center;">XRL 07/23/2015
+			</td>
+		</tr>
+	</table>
+</HTML>
